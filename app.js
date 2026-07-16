@@ -535,6 +535,7 @@ const MULTI_VIDEO_MODELS = {
     endpoint: KLING_3_OMNI.endpoint,
     queryEndpoint: KLING_3_OMNI.queryEndpoint,
     async: true,
+    supportsGenerateAudio: true,
     versions: [{ label: "Kling 3 Omni", value: KLING_3_OMNI.version }],
     sizes: KLING_3_OMNI.sizes,
     qualities: KLING_3_OMNI.qualities,
@@ -4153,7 +4154,7 @@ function renderMultiModelCell(row, model, disabled) {
 }
 
 function renderMultiParamsCell(row, model, disabled) {
-  return renderStackedControlCell([
+  const controls = [
     {
       label: "尺寸",
       control: `<select class="select-small" data-multi-field="size" ${disabled}>
@@ -4171,12 +4172,15 @@ function renderMultiParamsCell(row, model, disabled) {
       control: `<select class="select-small" data-multi-field="duration" ${disabled}>
         ${renderOptions(model.durations, String(row.duration), "空")}
       </select>`
-    },
-    {
+    }
+  ];
+  if (model.supportsGenerateAudio) {
+    controls.push({
       label: "声音",
       control: `<input data-multi-field="generateAudio" type="checkbox" ${row.generateAudio ? "checked" : ""} ${disabled}>`
-    }
-  ]);
+    });
+  }
+  return renderStackedControlCell(controls);
 }
 
 function renderViduRefModelCell(row, disabled) {
@@ -5803,6 +5807,7 @@ function handleImageVideoFrameDrop(event, row, field, drop) {
 }
 
 function updateMultiRowField(row, field, value, redraw = true) {
+  if (field === "generateAudio" && !getMultiModel(row).supportsGenerateAudio) return;
   if (isMultiRowLocked(row)) return;
   const becameDirty = markRowDirty(row);
   if (field === "model") {

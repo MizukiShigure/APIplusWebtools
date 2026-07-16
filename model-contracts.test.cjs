@@ -82,6 +82,15 @@ assert.equal(validateKling3OmniRow(row({ refs: [{ type: "image", url: "https://c
 
 const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const pageSource = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const multiVideoModelsSource = appSource.slice(
+  appSource.indexOf("const MULTI_VIDEO_MODELS"),
+  appSource.indexOf("const VIDU_REF_VIDEO_MODEL")
+);
+const seedanceModelSource = multiVideoModelsSource.split("kling3Omni:")[0];
+assert.match(multiVideoModelsSource, /kling3Omni:\s*\{[\s\S]*?supportsGenerateAudio:\s*true,/);
+assert.doesNotMatch(seedanceModelSource, /supportsGenerateAudio\s*:/);
+assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?generateAudio/);
+assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
 assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts must load before app.js");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
