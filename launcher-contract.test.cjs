@@ -49,6 +49,11 @@ assert(portQuery, "launcher-port-query.ps1 is missing");
 assert(start.includes("launcher-port-query.ps1") && stop.includes("launcher-port-query.ps1"), "launchers must use the exact-port query helper");
 assert(portQuery.includes("Get-NetTCPConnection -State Listen -LocalPort"), "port query must use exact listening TCP port lookup");
 assert(portQuery.includes("Get-CimInstance Win32_Process"), "port query must inspect listener command lines");
+assert(portQuery.includes('$process.Name -ieq "node.exe"'), "port query must only classify node.exe listeners as project or legacy servers");
+assert(!portQuery.includes("IndexOf("), "port query must not use substring command ownership checks");
+assert(portQuery.includes("Test-ExactCommandLineToken") && portQuery.includes("ProjectServerPath"), "port query must match the project script as an exact command-line token");
+assert(portQuery.includes("(?<!\\S)") && portQuery.includes('Token "server.cjs"'), "port query must enforce exact token boundaries for legacy scripts");
+assert(portQuery.includes("ShowLegacyCommandLines") && portQuery.includes("Legacy PID"), "port query must expose legacy command lines for confirmation");
 assert(pm2Owner, "launcher-pm2-owner.ps1 is missing");
 assert(pm2Owner.includes("jlist") && pm2Owner.includes("ConvertFrom-Json"), "PM2 owner helper must read PM2 jlist JSON");
 assert(pm2Owner.includes("$Pm2Cmd") && pm2Owner.includes("$Pm2Js") && pm2Owner.includes("$NodeExe"), "PM2 owner helper must support command and JS PM2 entries");
@@ -61,8 +66,9 @@ assert(start.indexOf("PM2_CONFLICT") < start.indexOf("startOrReload ecosystem.co
 assert(start.indexOf('if /I "%PM2_OWNER%"=="current"') < start.indexOf("startOrReload ecosystem.config.cjs"), "start must verify current PM2 ownership before reload");
 assert(start.includes("HAS_OTHER_LISTENER") && start.includes("Port %PORT% is already in use by another program."), "launcher must reject unrelated listener conflicts");
 assert(start.includes("PROJECT_PIDS") && start.includes("taskkill /PID %%P /F"), "launcher must replace only the current project fallback before PM2 start");
-assert(portQuery.includes("LEGACY_PIDS") && portQuery.includes("server\\.cjs"), "port query must classify bare legacy server commands separately");
+assert(portQuery.includes("LEGACY_PIDS") && portQuery.includes('Token "server.cjs"'), "port query must classify bare legacy server commands separately");
 assert(start.includes("LEGACY_PIDS") && start.includes("choice /C YN"), "start launcher must require confirmation before migrating legacy listeners");
+assert(start.indexOf("call :SHOW_LEGACY_COMMAND_LINES") < start.indexOf("choice /C YN"), "start must show legacy command lines before confirmation");
 assert(!scripts.includes(personalNodePath), "launchers must not contain a personal user path");
 assert(!scripts.toLowerCase().includes(codexRuntimePath), "launchers must not contain Codex runtime paths");
 
@@ -75,6 +81,7 @@ assert(stop.includes("%~dp0server.cjs"), "fallback stop must scope server.cjs to
 assert(stop.includes("HAS_OTHER_LISTENER") && stop.includes("PROJECT_PIDS") && stop.includes("LEGACY_PIDS"), "stop launcher must separate unrelated, project, and legacy listeners");
 assert(stop.indexOf("if defined PROJECT_PIDS") < stop.indexOf("taskkill /PID %%P /F"), "stop launcher must only kill a verified listener");
 assert(stop.includes("choice /C YN"), "stop launcher must require confirmation before stopping legacy listeners");
+assert(stop.indexOf("call :SHOW_LEGACY_COMMAND_LINES") < stop.indexOf("choice /C YN"), "stop must show legacy command lines before confirmation");
 assert(legacyStart.includes("call \"%~dp0Start_API_Tool.bat\""), "legacy launcher must delegate to the formal launcher");
 
 assert(readmeStart.includes("PM2") && readmeStart.includes("Node.js"), "quick-start readme must document PM2 and Node fallback");

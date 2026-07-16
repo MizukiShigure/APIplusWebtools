@@ -67,6 +67,7 @@ for /f "tokens=1,2 delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Byp
 exit /b 0
 
 :CONFIRM_LEGACY_STOP
+call :SHOW_LEGACY_COMMAND_LINES
 echo Legacy listener PID(s): %LEGACY_PIDS%
 choice /C YN /N /M "Stop these legacy server.cjs process(es)"
 if errorlevel 2 exit /b 1
@@ -74,6 +75,10 @@ for %%P in (%LEGACY_PIDS:,= %) do (
   echo Stopping legacy local server PID %%P...
   taskkill /PID %%P /F >nul 2>nul
 )
+exit /b 0
+
+:SHOW_LEGACY_COMMAND_LINES
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher-port-query.ps1" -Port %PORT% -ProjectServerPath "%~dp0server.cjs" -ShowLegacyCommandLines
 exit /b 0
 
 :PM2_CONFLICT
