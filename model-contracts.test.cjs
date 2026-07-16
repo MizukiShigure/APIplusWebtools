@@ -49,6 +49,11 @@ assert.deepEqual(buildKling3OmniPayload(row({ refs: [image, video] })), {
   options: {}
 });
 
+assert.throws(
+  () => buildKling3OmniPayload(row({ refs: [video, { ...video, url: "https://cdn.example/second.mp4" }] })),
+  /Kling 3 Omni 最多只能添加一个参考视频/
+);
+
 assert.equal(buildKling3OmniPayload(row({ refs: [image], generateAudio: false })).settings.audio, "off");
 assert.equal(buildKling3OmniPayload(row({ refs: [image] })).settings.audio, "native");
 assert.equal(buildKling3OmniPayload(row()).settings.audio, "native");

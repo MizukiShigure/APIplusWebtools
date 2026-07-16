@@ -46,6 +46,9 @@
 
   function buildKling3OmniPayload(row = {}) {
     const refs = Array.isArray(row.refs) ? row.refs : [];
+    if (refs.filter(asset => asset?.type === "video").length > 1) {
+      throw new Error("Kling 3 Omni 最多只能添加一个参考视频");
+    }
     const referenceIds = [];
     let imageIndex = 0;
     let videoIndex = 0;
