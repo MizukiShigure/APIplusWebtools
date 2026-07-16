@@ -1019,6 +1019,11 @@ const state = {
 };
 
 const app = document.querySelector("#app");
+app.addEventListener("click", event => {
+  const copyButton = event.target.closest(".copy-row-error");
+  if (!copyButton || !app.contains(copyButton)) return;
+  copyPromptText(copyButton.dataset.rowError || "");
+});
 const assetDialog = document.querySelector("#assetDialog");
 const assetDialogGrid = document.querySelector("#assetDialogGrid");
 const pasteDialog = document.querySelector("#pasteDialog");
@@ -2348,18 +2353,20 @@ function render() {
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">AI</div>
-          <div>
-            <h1>Internal API Batch</h1>
-            <p>内部生成任务工作台</p>
+        <div class="sidebar-head">
+          <div class="brand">
+            <div class="brand-mark">AI</div>
+            <div>
+              <h1>Internal API Batch</h1>
+              <p>内部生成任务工作台</p>
+            </div>
           </div>
+          <label class="field">
+            <span>API Base</span>
+            <input id="apiBase" type="url" spellcheck="false" value="${escapeAttr(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT)}">
+          </label>
+          ${renderRunningHubMotionConfig()}
         </div>
-        <label class="field">
-          <span>API Base</span>
-          <input id="apiBase" type="url" spellcheck="false" value="${escapeAttr(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT)}">
-        </label>
-        ${renderRunningHubMotionConfig()}
         <nav class="nav-group">
           <div class="nav-label">任务类型</div>
           ${TASK_PAGES.filter(page => page.id !== "history").map(page => navButton(page)).join("")}
@@ -2904,10 +2911,7 @@ function renderViduRefRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderViduRefPicker(row)}</td>
       <td>${renderViduRefModelCell(row, disabled)}</td>
@@ -3046,10 +3050,7 @@ function renderMotionRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderSingleAssetPicker(row, "image", "图", "image")}</td>
       <td>${renderSingleAssetPicker(row, "video", "参考视频", "video")}</td>
@@ -3192,10 +3193,7 @@ function renderAvatarRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderAvatarAssetPicker(row, "image", "图片", "image")}</td>
       <td>${renderAvatarAssetPicker(row, "audio", "音频", "audio")}</td>
@@ -3862,10 +3860,7 @@ function renderImageVideoRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderFramePicker(row, "firstFrame", "首帧图", true)}</td>
       <td>${renderFramePicker(row, "lastFrame", "尾帧图", supportsImageVideoLastFrame(row))}</td>
@@ -3945,10 +3940,7 @@ function renderMultiVideoRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderReferencePicker(row)}</td>
       <td>${renderMultiModelCell(row, model, disabled)}</td>
@@ -4014,10 +4006,7 @@ function renderRow(row, index) {
           </div>
         </div>
       </td>
-      <td>
-        <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-        ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-      </td>
+      <td>${renderRowStatusCell(row)}</td>
       <td>${renderPromptCell(row, disabled)}</td>
       <td>${renderImagePicker(row)}</td>
       <td>${renderImageModelCell(row, model, disabled)}</td>
@@ -4025,6 +4014,19 @@ function renderRow(row, index) {
       <td>${renderCountControl(row)}</td>
       <td data-task-result-cell>${renderTaskResultCell(row)}</td>
     </tr>
+  `;
+}
+
+function renderRowStatusCell(row) {
+  const error = String(row?.error || "");
+  return `
+    <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
+    ${error ? `
+      <div class="status-error-line">
+        <span class="status-summary" title="${escapeAttr(error)}">${escapeHtml(error)}</span>
+        <button class="tiny-button copy-row-error" data-row-error="${escapeAttr(row.error)}" type="button">复制报错信息</button>
+      </div>
+    ` : ""}
   `;
 }
 
@@ -9423,10 +9425,7 @@ function refreshRowSubmittedStateDisplay(row) {
   if (!tr) return;
   const statusCell = tr.children[1];
   if (statusCell) {
-    statusCell.innerHTML = `
-      <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
-      ${row.error ? `<div class="meta-line">${escapeHtml(row.error)}</div>` : ""}
-    `;
+    statusCell.innerHTML = renderRowStatusCell(row);
   }
   const taskCell = tr.querySelector("[data-task-result-cell]");
   if (taskCell) taskCell.innerHTML = renderTaskResultCell(row);

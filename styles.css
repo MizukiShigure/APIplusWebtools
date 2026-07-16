@@ -40,7 +40,7 @@ button {
 .app-shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: clamp(210px, 26vw, 300px) minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -48,13 +48,19 @@ button {
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface);
   border-right: 1px solid var(--line);
   padding: 18px 16px;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 16px;
+}
+
+.sidebar-head {
+  display: grid;
+  gap: 12px;
 }
 
 .brand {
@@ -193,6 +199,10 @@ textarea:focus {
   align-content: start;
   grid-auto-rows: max-content;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
 }
 
 .nav-label {
@@ -442,6 +452,32 @@ input:disabled {
   color: #46555c;
   font-size: 12px;
   font-weight: 700;
+}
+
+.status-error-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.status-summary {
+  display: block;
+  max-width: 10em;
+  overflow: hidden;
+  color: var(--red);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-row-error {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-queued,
@@ -1309,10 +1345,17 @@ input:disabled {
 }
 
 .row-actions {
-  min-width: 120px;
-  display: flex;
-  flex-wrap: wrap;
+  width: 84px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+}
+
+.row-actions .tiny-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page-placeholder {
@@ -2210,14 +2253,8 @@ input:disabled {
 }
 
 @media (max-width: 980px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
   .sidebar {
-    grid-template-rows: auto auto auto auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    padding: 14px 12px;
   }
 
   .topbar,
@@ -2228,5 +2265,27 @@ input:disabled {
 
   .batch-default-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    gap: 12px;
+    padding: 12px 10px;
+  }
+
+  .brand {
+    align-items: flex-start;
+  }
+
+  .brand h1,
+  .brand p,
+  .nav-button span,
+  .side-actions .button {
+    overflow-wrap: anywhere;
   }
 }
