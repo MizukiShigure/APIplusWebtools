@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node server.cjs",
-    "test": "node --check app.js && node --check model-contracts.js && node --check server.cjs && node history-recovery.test.cjs && node portable-package.test.cjs && node prompt-detail-panel.test.cjs && node compact-model-params-layout.test.cjs && node ui-layout-contract.test.cjs && node dirty-row-state.test.cjs && node dirty-row-clear.test.cjs && node model-contracts.test.cjs"
+    "test": "node --check app.js && node --check model-contracts.js && node --check server.cjs && node launcher-contract.test.cjs && node history-recovery.test.cjs && node portable-package.test.cjs && node prompt-detail-panel.test.cjs && node compact-model-params-layout.test.cjs && node ui-layout-contract.test.cjs && node dirty-row-state.test.cjs && node dirty-row-clear.test.cjs && node model-contracts.test.cjs"
   },
   "engines": {
     "node": ">=20"

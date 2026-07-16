@@ -14,11 +14,14 @@
    `https://gateway.example/api`
 5. 用完后双击 `Stop_API_Tool.bat` 停止本地服务。
 
+启动器会优先使用已安装的 PM2，以 `api-plus-webtools` 常驻运行并支持重复点击启动；没有 PM2 时会自动回退到最小化的 Node.js 进程，因此同事不需要安装 PM2。默认只监听 `127.0.0.1:4198`。停止时请使用 `Stop_API_Tool.bat`，它会先删除 PM2 应用，再安全检查 Node.js 回退进程。
+
 ## 环境要求
 
 - Windows 10/11。
 - Node.js 20 或更高版本。
 - 如果电脑没有全局 Node.js，可以把 `node.exe` 放到本目录的 `runtime` 文件夹内，启动脚本会自动优先查找。
+- PM2 是可选项；安装后启动器会优先使用它，无需为使用本工具单独安装。
 - 如果要通过 Git 拉取更新，需要安装 Git for Windows。
 
 ## Git 安装与更新
