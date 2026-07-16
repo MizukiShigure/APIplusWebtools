@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>History Bridge</title>
+</head>
+<body>
+<script>
+(async () => {
+  const DB_NAME = "api_console_history_db_v1";
+  const DB_VERSION = 1;
+  const STORE = "history";
+  const UPLOAD_KEYS = ["api_console_upload_history_v2", "api_console_stable_single_add_row_upload_history_v2"];
+  const GENERATION_KEYS = ["api_console_generation_history_v2", "api_console_stable_single_add_row_generation_history_v2"];
+
+  function readJson(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function assetUrl(item) {
+    if (!item) return "";
+    if (typeof item === "string") return item.trim();
+    const keys = ["url", "data", "file_url", "fileUrl", "cdn_url", "cdnUrl", "download_url", "downloadUrl", "path"];
+    for (const key of keys) {
+      const value = item[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (value && typeof value === "object") {
+        const nested = assetUrl(value);
+        if (nested) return nested;
+      }
+    }
+    return "";
+  }
+
+  function looksLikeUploadHistory(value) {
+    return Array.isArray(value) && value.some(item => assetUrl(item) && !Array.isArray(item?.results) && !item?.prompt && !item?.taskId && !item?.model);
+  }
+
+  function looksLikeGenerationHistory(value) {
+    return Array.isArray(value) && value.some(item => Array.isArray(item?.results) || item?.result || (item?.taskId && item?.prompt));
+  }
+
+  function localStorageCandidates(kind) {
+    const keys = new Set(kind === "upload" ? UPLOAD_KEYS : GENERATION_KEYS);
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (/history/i.test(key || "")) keys.add(key);
+    }
+    const lists = [];
+    keys.forEach(key => {
+      const value = readJson(key);
+      if (kind === "upload" && looksLikeUploadHistory(value)) lists.push(...value);
+      if (kind === "generation" && looksLikeGenerationHistory(value)) lists.push(...value);
+    });
+    return lists;
+  }
+
+  function openDb() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "key" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+  }
+
+  async function readDbHistory() {
+    const db = await openDb();
+    if (!db || !db.objectStoreNames.contains(STORE)) return { uploads: [], generations: [] };
+    return new Promise(resolve => {
+      const tx = db.transaction(STORE, "readonly");
+      const store = tx.objectStore(STORE);
+      const uploadsReq = store.get("uploadHistory");
+      const generationsReq = store.get("generationHistory");
+      const result = { uploads: [], generations: [] };
+      uploadsReq.onsuccess = () => {
+        if (Array.isArray(uploadsReq.result?.value)) result.uploads = uploadsReq.result.value;
+      };
+      generationsReq.onsuccess = () => {
+        if (Array.isArray(generationsReq.result?.value)) result.generations = generationsReq.result.value;
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => resolve(result);
+    });
+  }
+
+  const db = await readDbHistory();
+  const payload = {
+    type: "api-console-history-bridge",
+    origin: location.origin,
+    uploads: [...db.uploads, ...localStorageCandidates("upload")],
+    generations: [...db.generations, ...localStorageCandidates("generation")]
+  };
+  window.parent.postMessage(payload, "*");
+})();
+</script>
+</body>
+</html>

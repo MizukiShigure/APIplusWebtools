@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Internal API Batch Console</title>
+  <link rel="stylesheet" href="./styles.css?v=portable-20260716">
+</head>
+<body>
+  <div id="app"></div>
+
+  <dialog id="assetDialog" class="modal">
+    <form method="dialog" class="modal-panel">
+      <div class="modal-head">
+        <h2>选择历史上传素材</h2>
+        <button class="ghost-button" value="cancel" type="submit">关闭</button>
+      </div>
+      <div class="asset-filter">
+        <button class="filter-chip active" data-filter="image" type="button">图片</button>
+        <button class="filter-chip" data-filter="video" type="button">视频</button>
+        <button class="filter-chip" data-filter="audio" type="button">音频</button>
+        <button class="filter-chip" data-filter="other" type="button">其他</button>
+      </div>
+      <div id="assetDialogGrid" class="asset-grid"></div>
+    </form>
+  </dialog>
+
+  <dialog id="pasteDialog" class="modal">
+    <form method="dialog" class="modal-panel">
+      <div class="modal-head">
+        <h2>批量粘贴 Prompt</h2>
+        <button class="ghost-button" value="cancel" type="submit">关闭</button>
+      </div>
+
+      <section class="batch-defaults">
+        <div class="batch-default-grid">
+          <label class="field">
+            <span>模型</span>
+            <select id="batchModel"></select>
+          </label>
+          <label class="field">
+            <span>模型版本</span>
+            <select id="batchVersion"></select>
+          </label>
+          <label class="field">
+            <span>尺寸</span>
+            <select id="batchSize"></select>
+          </label>
+          <label class="field">
+            <span>清晰度</span>
+            <select id="batchQuality"></select>
+          </label>
+          <label class="field">
+            <span>一次生成数量</span>
+            <input id="batchCount" type="number" min="1" step="1" value="1">
+          </label>
+        </div>
+
+        <div class="batch-image-defaults">
+          <div class="batch-default-title">统一图片</div>
+          <div id="batchImageDrop" class="image-drop batch-image-drop" tabindex="0" title="点击这里后按 Ctrl+V 可粘贴截图或复制的图片">
+            <span class="empty-drop">批量生成行会统一带上这里的图片</span>
+          </div>
+          <div class="picker-actions">
+            <button id="batchChooseAssets" class="tiny-button" type="button">选择</button>
+            <button id="batchCopyImages" class="tiny-button" type="button" disabled>复制</button>
+            <label class="tiny-button file-button">
+              上传
+              <input id="batchUploadImages" type="file" accept="image/*" multiple>
+            </label>
+            <button id="batchPasteImages" class="tiny-button" type="button">粘贴</button>
+            <button id="batchClearImages" class="tiny-button" type="button">清空</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="paste-help">
+        <strong>推荐格式：每条用 &lt;&lt;&lt;PROMPT 编号 和 PROMPT&gt;&gt;&gt; 包起来，Prompt 内部可以自由换行。</strong>
+        <span>也支持直接粘贴 MinimaxHUB 表格、CSV/TSV 表格，系统会自动识别标题含 Prompt/提示词的列；都不符合时才按每行一条处理。</span>
+      </div>
+      <textarea id="pasteText" rows="12" placeholder="&lt;&lt;&lt;PROMPT 001
+这里写第一条 Prompt，可以包含多行。
+PROMPT&gt;&gt;&gt;
+
+&lt;&lt;&lt;PROMPT 002
+这里写第二条 Prompt。
+PROMPT&gt;&gt;&gt;"></textarea>
+      <div class="dialog-actions">
+        <button id="confirmPasteBtn" class="button primary" value="default" type="button">生成行</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./app.js?v=portable-20260716"></script>
+</body>
+</html>
