@@ -8,6 +8,7 @@ param(
 $expectedPath = [System.IO.Path]::GetFullPath($ProjectServerPath)
 $connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 $projectPids = @()
+$legacyPids = @()
 $hasOtherListener = $false
 
 foreach ($ownerProcessId in @($connections | Select-Object -ExpandProperty OwningProcess -Unique)) {
@@ -15,6 +16,8 @@ foreach ($ownerProcessId in @($connections | Select-Object -ExpandProperty Ownin
   $commandLine = [string]$process.CommandLine
   if ($commandLine -and $commandLine.IndexOf($expectedPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
     $projectPids += $ownerProcessId
+  } elseif ($commandLine -match '(?i)(?<![\\/:])server\.cjs(?![\\/:])') {
+    $legacyPids += $ownerProcessId
   } else {
     $hasOtherListener = $true
   }
@@ -22,6 +25,10 @@ foreach ($ownerProcessId in @($connections | Select-Object -ExpandProperty Ownin
 
 if ($projectPids.Count -gt 0) {
   Write-Output "PROJECT_PIDS=$($projectPids -join ',')"
+}
+
+if ($legacyPids.Count -gt 0) {
+  Write-Output "LEGACY_PIDS=$($legacyPids -join ',')"
 }
 
 if ($hasOtherListener) {
