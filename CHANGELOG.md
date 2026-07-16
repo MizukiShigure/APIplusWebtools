@@ -1,5 +1,11 @@
 # Changelog
 
+## v2026.07.16-omni-ui.1
+
+- Added a privacy-safe portable builder with an explicit public-file whitelist.
+- Portable ZIPs contain empty `data/.keep` and `runtime/.keep` placeholders only.
+- Removed the embedded API Base default from the portable artifact.
+
 ## v2026.07.16-portable.1
 
 - 整理为独立本地部署工具包。

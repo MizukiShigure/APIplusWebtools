@@ -2,7 +2,7 @@
 
 本工具是一个本地浏览器批量调用页面。它只在本机启动一个 Node.js 静态服务，页面从浏览器访问，实际模型调用仍走页面里配置的公司 API Base。
 
-当前版本：`v2026.07.16-portable.1`
+当前版本：`v2026.07.16-omni-ui.1`
 
 ## 快速启动
 
@@ -10,8 +10,7 @@
 2. 双击 `Start_API_Tool.bat`。
 3. 浏览器打开：
    `http://127.0.0.1:4198/?v=portable-20260716`
-4. 左侧 `API Base` 填公司中转地址，例如：
-   `https://gateway.example/api`
+4. 左侧 `API Base` 填你的公司中转地址。
 5. 用完后双击 `Stop_API_Tool.bat` 停止本地服务。
 
 启动器会优先使用已安装的 PM2，以 `api-plus-webtools` 常驻运行并支持重复点击启动；没有 PM2 时会自动回退到最小化的 Node.js 进程，因此同事不需要安装 PM2。默认只监听 `127.0.0.1:4198`。停止时请使用 `Stop_API_Tool.bat`，它会先删除 PM2 应用，再安全检查 Node.js 回退进程。
@@ -53,7 +52,7 @@ git pull --ff-only
 每个稳定版会打 Git tag，例如：
 
 ```text
-v2026.07.16-portable.1
+v2026.07.16-omni-ui.1
 ```
 
 查看所有版本：
@@ -71,7 +70,7 @@ Restore_Version.bat
 或者手动执行：
 
 ```bat
-git checkout v2026.07.16-portable.1
+git checkout v2026.07.16-omni-ui.1
 ```
 
 回到最新版主线：
@@ -109,13 +108,21 @@ http://127.0.0.1:4300/
 
 ## 打包分发
 
-双击 `Make_Portable_Package.bat` 会生成一个 zip 包：
+双击 `Make_Portable_Package.bat` 会生成一个 zip 包。也可以从命令行指定目标文件：
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1 -OutputPath C:\Temp\Internal_API_Batch_Portable.zip
+```
+
+默认输出位置：
 
 ```text
-dist\Internal_API_Batch_Portable_*.zip
+dist\Internal_API_Batch_Portable_v2026.07.16-omni-ui.1.zip
 ```
 
 把这个 zip 发给同事即可。对方解压后运行 `Start_API_Tool.bat`。
+
+便携包只包含程序文件，`data` 与 `runtime` 目录只保留空占位文件；不会带出浏览器缓存、历史、队列、Prompt、主体记录、API Key、日志、测试文件或规划笔记。包内 API Base 默认为空，由使用者在浏览器中自行填写。
 
 注意：zip 包适合一次性分发；如果希望后续直接拉取更新，请让用户用 `git clone` 安装。
 
