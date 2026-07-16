@@ -87,8 +87,19 @@ const multiVideoModelsSource = appSource.slice(
   appSource.indexOf("const VIDU_REF_VIDEO_MODEL")
 );
 const seedanceModelSource = multiVideoModelsSource.split("kling3Omni:")[0];
+const imageVideoModelsSource = appSource.slice(
+  appSource.indexOf("const IMAGE_VIDEO_MODELS"),
+  appSource.indexOf("const MULTI_VIDEO_MODELS")
+);
 assert.match(multiVideoModelsSource, /kling3Omni:\s*\{[\s\S]*?supportsGenerateAudio:\s*true,/);
 assert.doesNotMatch(seedanceModelSource, /supportsGenerateAudio\s*:/);
+assert.match(appSource, /const \{ KLING_3_OMNI, seedance2QualityOptions \} = MODEL_CONTRACTS;/, "app must consume the Seedance 2 quality contract");
+assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}[\s\S]*?qualitiesFor\(row\)\s*\{\s*return row\.version === "doubao-seedance-2-0-260128" \? seedance2QualityOptions\(row\.version\) : this\.qualities;\s*\}/, "mixed Seedance image-video entry must delegate 2.0 qualities to the contract");
+assert.match(imageVideoModelsSource, /seedance2:\s*\{[\s\S]*?versions: \[\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}\][\s\S]*?qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "dedicated Seedance 2 image-video entry must delegate qualities to the contract");
+assert.match(seedanceModelSource, /qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "multimodal Seedance must delegate version qualities to the contract");
+assert.doesNotMatch(seedanceModelSource, /qualitiesByVersion\s*:/, "multimodal Seedance must not duplicate version quality rules");
+assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?build\(row\)\s*\{[\s\S]*?resolution: row\.quality \|\| undefined/, "Seedance image-video requests must send the selected resolution");
+assert.match(appSource, /function buildSeedance2Payload\(row\)[\s\S]*?resolution: row\.quality \|\| undefined/, "Seedance multimodal requests must send the selected resolution");
 assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?generateAudio/);
 assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
 assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts must load before app.js");

@@ -8,7 +8,7 @@ const VIDEO_COMPRESS_MARGIN = 0.995;
 const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
-const { KLING_3_OMNI } = MODEL_CONTRACTS;
+const { KLING_3_OMNI, seedance2QualityOptions } = MODEL_CONTRACTS;
 const STORAGE_KEYS = {
   apiBase: "api_console_api_base",
   activePage: "api_console_active_page",
@@ -393,10 +393,13 @@ const IMAGE_VIDEO_MODELS = {
     async: true,
     versions: [
       { label: "Seedance 1.5 Pro", value: "seedance-1.5-pro" },
-      { label: "Seedance 2.0", value: "seedance-2-0-260128" }
+      { label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" }
     ],
     sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
     qualities: ["480p", "720p", "1080p"],
+    qualitiesFor(row) {
+      return row.version === "doubao-seedance-2-0-260128" ? seedance2QualityOptions(row.version) : this.qualities;
+    },
     durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
     supportsTextOnly: true,
     supportsFirstFrame: true,
@@ -418,9 +421,12 @@ const IMAGE_VIDEO_MODELS = {
     endpoint: "/seedance",
     queryEndpoint: "/seedance_query",
     async: true,
-    versions: [{ label: "Seedance 2.0", value: "seedance-2-0-260128" }],
+    versions: [{ label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" }],
     sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
-    qualities: ["480p", "720p", "1080p"],
+    qualities: seedance2QualityOptions("doubao-seedance-2-0-260128"),
+    qualitiesFor(row) {
+      return seedance2QualityOptions(row.version);
+    },
     durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
     supportsTextOnly: true,
     supportsFirstFrame: true,
@@ -515,10 +521,9 @@ const MULTI_VIDEO_MODELS = {
       { label: "Seedance 2.0 Fast", value: "doubao-seedance-2-0-fast-260128" }
     ],
     sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
-    qualities: ["480p", "720p", "1080p"],
-    qualitiesByVersion: {
-      "doubao-seedance-2-0-260128": ["480p", "720p", "1080p"],
-      "doubao-seedance-2-0-fast-260128": ["480p", "720p"]
+    qualities: seedance2QualityOptions("doubao-seedance-2-0-260128"),
+    qualitiesFor(row) {
+      return seedance2QualityOptions(row.version);
     },
     defaultDuration: "5",
     durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
@@ -5818,7 +5823,8 @@ function updateMultiRowField(row, field, value, redraw = true) {
     row.model = value;
     row.version = next.versions[0].value;
     row.size = chooseCompatibleOption(previousSize, next.sizes);
-    row.quality = chooseCompatibleOption(previousQuality, next.qualities, next.qualities[1] || next.qualities[0] || "");
+    const qualityOptions = getMultiQualityOptions(row);
+    row.quality = chooseCompatibleOption(previousQuality, qualityOptions, qualityOptions[1] || qualityOptions[0] || "");
     row.duration = next.durations.includes(String(previousDuration)) ? String(previousDuration) : (next.durations[0] || "5");
     row.refs = row.refs.slice(0, next.maxRefs);
   } else if (field === "count") {
@@ -11461,7 +11467,7 @@ function getMultiModel(row) {
 
 function getMultiQualityOptions(row) {
   const model = getMultiModel(row);
-  return model.qualitiesByVersion?.[row.version] || model.qualities || [];
+  return typeof model.qualitiesFor === "function" ? model.qualitiesFor(row) : model.qualities || [];
 }
 
 function getViduRefQualityOptions(row) {
