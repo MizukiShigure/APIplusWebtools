@@ -7,6 +7,8 @@ const SEEDANCE_FAST_VIDEO_PIXEL_LIMIT = 2086876;
 const VIDEO_COMPRESS_MARGIN = 0.995;
 const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
+const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
+const { KLING_3_OMNI } = MODEL_CONTRACTS;
 const STORAGE_KEYS = {
   apiBase: "api_console_api_base",
   activePage: "api_console_active_page",
@@ -521,22 +523,28 @@ const MULTI_VIDEO_MODELS = {
     defaultDuration: "5",
     durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
     maxRefs: 10,
+    validate() {
+      return "";
+    },
     build(row) {
       return buildSeedance2Payload(row);
     }
   },
   kling3Omni: {
     label: "可灵 3 Omni",
-    endpoint: "/kling_3_omni_video",
-    queryEndpoint: "/kling_3_omni_video_query",
+    endpoint: KLING_3_OMNI.endpoint,
+    queryEndpoint: KLING_3_OMNI.queryEndpoint,
     async: true,
-    versions: [{ label: "Kling 3 Omni", value: "kling-3-omni" }],
-    sizes: ["16:9", "9:16", "1:1"],
-    qualities: ["720p", "1080p"],
-    durations: ["5", "10"],
+    versions: [{ label: "Kling 3 Omni", value: KLING_3_OMNI.version }],
+    sizes: KLING_3_OMNI.sizes,
+    qualities: KLING_3_OMNI.qualities,
+    durations: KLING_3_OMNI.durations,
     maxRefs: 10,
-    build() {
-      throw new Error("可灵 3 Omni 多模态参数规则待配置，当前请先使用 Seedance 2.0");
+    validate(row) {
+      return MODEL_CONTRACTS.validateKling3OmniRow(row);
+    },
+    build(row) {
+      return MODEL_CONTRACTS.buildKling3OmniPayload(row);
     }
   }
 };
@@ -4163,6 +4171,10 @@ function renderMultiParamsCell(row, model, disabled) {
       control: `<select class="select-small" data-multi-field="duration" ${disabled}>
         ${renderOptions(model.durations, String(row.duration), "空")}
       </select>`
+    },
+    {
+      label: "声音",
+      control: `<input data-multi-field="generateAudio" type="checkbox" ${row.generateAudio ? "checked" : ""} ${disabled}>`
     }
   ]);
 }
@@ -5333,7 +5345,10 @@ function bindMultiRow(tr, row) {
     persistMultiRows();
   });
   tr.querySelectorAll("[data-multi-field]").forEach(input => {
-    input.addEventListener("change", event => updateMultiRowField(row, event.target.dataset.multiField, event.target.value));
+    input.addEventListener("change", event => {
+      const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+      updateMultiRowField(row, event.target.dataset.multiField, value);
+    });
   });
   tr.querySelectorAll("[data-field]").forEach(input => {
     input.addEventListener("change", event => updateMultiRowField(row, event.target.dataset.field, event.target.value));
@@ -5808,6 +5823,8 @@ function updateMultiRowField(row, field, value, redraw = true) {
     row.quality = chooseCompatibleOption(row.quality, getMultiQualityOptions(row), getMultiQualityOptions(row)[0] || "");
   } else if (field === "duration") {
     row.duration = String(value || "5");
+  } else if (field === "generateAudio") {
+    row.generateAudio = Boolean(value);
   } else {
     row[field] = value;
   }
@@ -12020,6 +12037,9 @@ function validateViduRefRowBeforeQueue(row) {
 }
 
 function validateMultiRowBeforeQueue(row) {
+  const model = getMultiModel(row);
+  const validationError = model.validate(row);
+  if (validationError) return validationError;
   if (!row.prompt.trim()) return "Prompt 不能为空";
   if (row.model === "seedance") {
     const oversized = normalizeAssets(row.refs || []).find(asset => {
