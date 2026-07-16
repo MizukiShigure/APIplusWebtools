@@ -24,17 +24,24 @@ if not defined PM2_CMD if not defined PM2_JS if exist "%APPDATA%\npm\node_module
 if defined PM2_CMD "%PM2_CMD%" delete api-plus-webtools
 if defined PM2_JS if defined NODE_EXE "%NODE_EXE%" "%PM2_JS%" delete api-plus-webtools
 
-set "FOUND="
-
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":%PORT%" ^| findstr "LISTENING"') do (
-  set "MATCH="
-  for /f "usebackq delims=" %%C in (`powershell -NoProfile -Command "$process = Get-CimInstance Win32_Process -Filter 'ProcessId=%%P'; if ($process.CommandLine -and $process.CommandLine -like '*server.cjs*' -and $process.CommandLine -like '*%~dp0server.cjs*') { 'MATCH' }"`) do set "MATCH=%%C"
-  if defined MATCH (
-    set "FOUND=1"
+call :QUERY_LISTENER
+if defined HAS_OTHER_LISTENER echo Port %PORT% is in use by another program and was not stopped.
+if defined PROJECT_PIDS (
+  for %%P in (%PROJECT_PIDS:,= %) do (
     echo Stopping local server PID %%P...
     taskkill /PID %%P /F >nul 2>nul
   )
+) else (
+  if not defined HAS_OTHER_LISTENER echo No matching local server is listening on port %PORT%.
 )
-
-if not defined FOUND echo No matching local server is listening on port %PORT%.
 pause
+exit /b 0
+
+:QUERY_LISTENER
+set "PROJECT_PIDS="
+set "HAS_OTHER_LISTENER="
+for /f "tokens=1,2 delims==" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher-port-query.ps1" -Port %PORT% -ProjectServerPath "%~dp0server.cjs"') do (
+  if /I "%%A"=="PROJECT_PIDS" set "PROJECT_PIDS=%%B"
+  if /I "%%A"=="HAS_OTHER_LISTENER" if "%%B"=="1" set "HAS_OTHER_LISTENER=1"
+)
+exit /b 0
