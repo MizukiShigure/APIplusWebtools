@@ -24,3 +24,10 @@ Thumbs.db
 
 # Nested recovery/debug scratch
 .codex-tmp/
+.worktrees/
+
+# Local implementation planning notes
+docs/superpowers/plans/
+findings.md
+progress.md
+task_plan.md
