@@ -2715,7 +2715,7 @@ function renderMultiVideoPage() {
     <section class="topbar">
       <div class="page-title">
         <h2>多模态生视频</h2>
-        <p>Seedance 2.0 多模态参考模式；可灵 3 Omni 已预留，待单独规则配置。</p>
+        <p>Seedance 2.0 与可灵 3 Omni 多模态参考；素材编号可在 Prompt 中通过 @ 引用。</p>
       </div>
       <div class="topbar-controls">
         <label class="field compact-field">
@@ -5698,14 +5698,14 @@ function updateImageVideoRowField(row, field, value, redraw = true) {
     row.model = value;
     row.version = next.versions[0].value;
     row.size = previousSize === "" ? "" : chooseCompatibleOption(previousSize, getImageVideoSizeOptions(row), getImageVideoSizeOptions(row)[0] || "");
-    row.quality = chooseCompatibleOption(previousQuality, getImageVideoQualityOptions(row), getImageVideoQualityOptions(row)[0] || "");
+    row.quality = nearestQualityOption(previousQuality, getImageVideoQualityOptions(row), getImageVideoQualityOptions(row)[0] || "");
     row.duration = getImageVideoDurationOptions(row).includes(String(previousDuration)) ? String(previousDuration) : (getImageVideoDurationOptions(row)[0] || "5");
     if (!supportsImageVideoLastFrame(row)) row.lastFrame = null;
     if (!supportsImageVideoAutoMultiShot(row)) row.autoMultiShot = false;
   } else if (field === "version") {
     row.version = value;
     row.size = row.size === "" ? "" : chooseCompatibleOption(row.size, getImageVideoSizeOptions(row), getImageVideoSizeOptions(row)[0] || "");
-    row.quality = chooseCompatibleOption(row.quality, getImageVideoQualityOptions(row), getImageVideoQualityOptions(row)[0] || "");
+    row.quality = nearestQualityOption(row.quality, getImageVideoQualityOptions(row), getImageVideoQualityOptions(row)[0] || "");
     row.duration = getImageVideoDurationOptions(row).includes(String(row.duration)) ? String(row.duration) : (getImageVideoDurationOptions(row)[0] || "5");
     if (!supportsImageVideoLastFrame(row)) row.lastFrame = null;
     if (!supportsImageVideoAutoMultiShot(row)) row.autoMultiShot = false;

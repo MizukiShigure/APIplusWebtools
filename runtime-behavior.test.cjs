@@ -55,6 +55,12 @@ assert.match(
   /row\.quality = nearestQualityOption\(row\.quality, getMultiQualityOptions\(row\), getMultiQualityOptions\(row\)\[0\] \|\| ""\);/,
   "Seedance version changes must select the nearest supported quality"
 );
+assert.match(
+  source,
+  /row\.quality = nearestQualityOption\(row\.quality, getImageVideoQualityOptions\(row\), getImageVideoQualityOptions\(row\)\[0\] \|\| ""\);/,
+  "Seedance image-video version changes must select the nearest supported quality"
+);
+assert.doesNotMatch(source, /可灵 3 Omni 已预留，待单独规则配置/, "the multimodal page must not describe Kling Omni as unavailable");
 assert.match(source, /formatProviderError\(json, `HTTP \$\{response\.status\}`\)/, "HTTP failures must preserve their structured response body");
 assert.doesNotMatch(source, /if \(!response\.success\) throw new Error\(response\.message \|\|/, "task failures must not discard structured provider details");
 

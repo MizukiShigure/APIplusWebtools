@@ -127,12 +127,16 @@ assert(start.indexOf("PM2_CONFLICT") < start.indexOf("startOrReload ecosystem.co
 assert(start.indexOf('if /I "%PM2_OWNER%"=="current"') < start.indexOf("startOrReload ecosystem.config.cjs"), "start must verify current PM2 ownership before reload");
 const pm2OwnerQueryIndex = start.indexOf("call :QUERY_PM2_OWNER");
 const preflightListenerQueryIndex = start.indexOf("call :QUERY_LISTENER", pm2OwnerQueryIndex);
-const currentPm2RouteIndex = start.indexOf('if /I "%PM2_OWNER%"=="current" goto START_PM2');
+const trustedPm2RouteIndex = start.indexOf('if defined TRUSTED_PROJECT_PIDS if /I "%PM2_OWNER%"=="current" goto START_PM2');
+const fallbackReplacementIndex = start.indexOf("if defined PROJECT_PIDS (");
+const currentPm2RouteIndex = start.indexOf('if /I "%PM2_OWNER%"=="current" goto START_PM2', fallbackReplacementIndex);
 const pm2ReloadIndex = start.indexOf("startOrReload ecosystem.config.cjs");
 const postReloadListenerQueryIndex = start.indexOf("call :QUERY_LISTENER", pm2ReloadIndex);
 const openPageLabelIndex = start.indexOf(":OPEN_PAGE");
 assert(preflightListenerQueryIndex > pm2OwnerQueryIndex && preflightListenerQueryIndex < pm2ReloadIndex, "PM2 startup must inspect the requested port before reload");
 assert(currentPm2RouteIndex > preflightListenerQueryIndex, "an owned PM2 app must pass requested-port inspection before startup");
+assert(trustedPm2RouteIndex > preflightListenerQueryIndex && trustedPm2RouteIndex < fallbackReplacementIndex, "an already-listening owned PM2 app must bypass fallback replacement");
+assert(currentPm2RouteIndex > fallbackReplacementIndex, "a stopped owned PM2 registration must replace an active project fallback before reload");
 assert(postReloadListenerQueryIndex > pm2ReloadIndex && postReloadListenerQueryIndex < openPageLabelIndex, "PM2 startup must verify its requested-port listener before reporting success");
 const postReloadVerification = start.slice(postReloadListenerQueryIndex, openPageLabelIndex);
 assert(postReloadVerification.includes("if defined TRUSTED_PROJECT_PIDS goto OPEN_PAGE"), "PM2 startup must require its verified PID to own the requested listener");

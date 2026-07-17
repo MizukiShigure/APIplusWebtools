@@ -42,12 +42,13 @@ if /I "%PM2_OWNER%"=="conflict" goto PM2_CONFLICT
 call :QUERY_LISTENER
 if defined QUERY_FAILED goto PORT_CHECK_FAILED
 if defined HAS_OTHER_LISTENER goto PORT_CONFLICT
-if /I "%PM2_OWNER%"=="current" goto START_PM2
+if defined TRUSTED_PROJECT_PIDS if /I "%PM2_OWNER%"=="current" goto START_PM2
 if defined PROJECT_PIDS (
   echo Replacing the existing local fallback server...
   for %%P in (%PROJECT_PIDS:,= %) do taskkill /PID %%P /F >nul 2>nul
   timeout /t 1 /nobreak >nul
 )
+if /I "%PM2_OWNER%"=="current" goto START_PM2
 goto START_PM2
 
 :NODE_FALLBACK

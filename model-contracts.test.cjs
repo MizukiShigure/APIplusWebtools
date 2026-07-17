@@ -37,6 +37,7 @@ assert.deepEqual(KLING_3_OMNI, {
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-260128"), ["480p", "720p", "1080p", "4k"]);
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-fast-260128"), ["480p", "720p"]);
 assert.equal(nearestQualityOption("4k", ["480p", "720p"]), "720p");
+assert.equal(nearestQualityOption("4k", ["480p", "720p", "1080p"]), "1080p");
 assert.equal(nearestQualityOption("1080p", ["480p", "720p"]), "720p");
 assert.equal(nearestQualityOption("720p", ["480p", "720p"]), "720p");
 assert.equal(nearestQualityOption("", ["480p", "720p"], "720p"), "720p");
