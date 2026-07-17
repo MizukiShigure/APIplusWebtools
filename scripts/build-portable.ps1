@@ -78,10 +78,11 @@ try {
 
   $stagedApp = Join-Path $stage "app.js"
   $appText = [System.IO.File]::ReadAllText($stagedApp, $utf8)
-  $sanitizedAppText = [regex]::Replace($appText, '(?m)^const API_DEFAULT = "[^"]*";\r?$', 'const API_DEFAULT = "";')
-  if ($sanitizedAppText -eq $appText) {
+  $apiDefaultPattern = '(?m)^const API_DEFAULT = "[^"]*";\r?$'
+  if ([regex]::Matches($appText, $apiDefaultPattern).Count -ne 1) {
     throw "Unable to sanitize the portable API Base default."
   }
+  $sanitizedAppText = [regex]::Replace($appText, $apiDefaultPattern, 'const API_DEFAULT = "";')
   [System.IO.File]::WriteAllText($stagedApp, $sanitizedAppText, $utf8)
 
   foreach ($directory in @("data", "runtime")) {

@@ -59,18 +59,18 @@ function assertNoLiteralCredentials(text) {
   }
 }
 
-function runPortableBuilder(output) {
+function runPortableBuilder(output, packageRoot = root) {
   return childProcess.execFileSync("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
-    "-File", builder,
+    "-File", path.join(packageRoot, "scripts", "build-portable.ps1"),
     "-OutputPath", output
-  ], { cwd: root, encoding: "utf8", stdio: "pipe" });
+  ], { cwd: packageRoot, encoding: "utf8", stdio: "pipe" });
 }
 
-function expectPortableBuilderFailure(output) {
+function expectPortableBuilderFailure(output, packageRoot = root) {
   try {
-    runPortableBuilder(output);
+    runPortableBuilder(output, packageRoot);
   } catch (error) {
     return String(error.stderr || error.stdout || error.message);
   }
@@ -88,6 +88,10 @@ const builder = path.join(root, "scripts", "build-portable.ps1");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "api-tools-portable-test-"));
 const outputPath = path.join(tempRoot, "portable.zip");
 const expandedPath = path.join(tempRoot, "expanded");
+const rebuiltOutputPath = path.join(tempRoot, "portable-rebuilt.zip");
+const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
+const malformedPackagePath = path.join(tempRoot, "malformed-package");
+const malformedOutputPath = path.join(tempRoot, "malformed-portable.zip");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
@@ -151,6 +155,30 @@ try {
   assert(packagedApp.includes('sourceUrl: ""'), "portable app must leave RunningHub sourceUrl blank");
   assert(packagedApp.includes('clientId: ""'), "portable app must leave RunningHub clientId blank");
   assert(packagedApp.includes('versions: [{ label: "RunningHub", value: "" }]'), "portable app must use a neutral RunningHub model version");
+
+  runPortableBuilder(rebuiltOutputPath, expandedPath);
+  assert(fs.existsSync(rebuiltOutputPath), "packaged portable builder did not create the second-generation ZIP");
+  childProcess.execFileSync("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `Expand-Archive -LiteralPath ${quotePowerShell(rebuiltOutputPath)} -DestinationPath ${quotePowerShell(rebuiltExpandedPath)} -Force`
+  ], { cwd: expandedPath, encoding: "utf8", stdio: "pipe" });
+  const rebuiltFiles = collectFiles(rebuiltExpandedPath).sort();
+  assert(JSON.stringify(rebuiltFiles) === JSON.stringify(expectedFiles), `unexpected second-generation portable contents: ${rebuiltFiles.join(", ")}`);
+  const rebuiltApp = fs.readFileSync(path.join(rebuiltExpandedPath, "app.js"), "utf8");
+  assert(rebuiltApp.includes('const API_DEFAULT = "";'), "second-generation portable app must retain an empty API Base");
+
+  fs.cpSync(expandedPath, malformedPackagePath, { recursive: true });
+  const malformedAppPath = path.join(malformedPackagePath, "app.js");
+  fs.writeFileSync(
+    malformedAppPath,
+    fs.readFileSync(malformedAppPath, "utf8").replace('const API_DEFAULT = "";', 'const API_DEFAULT = getApiDefault();'),
+    "utf8"
+  );
+  const malformedPackageFailure = expectPortableBuilderFailure(malformedOutputPath, malformedPackagePath);
+  assert(/Unable to sanitize the portable API Base default\./.test(malformedPackageFailure), "portable builder must reject an unrecognized API Base declaration");
+  assert(!fs.existsSync(malformedOutputPath), "portable builder must not produce a ZIP from an unrecognized API Base declaration");
+
   assert(/if not exist "\.git"/i.test(restoreScript), "Restore_Version.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");
   assert(/if not exist "\.git"/i.test(updateScript), "Update_From_Git.bat must guard ZIP installs without .git");
