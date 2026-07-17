@@ -121,6 +121,34 @@ assert(pm2Owner.includes("pm_cwd") && pm2Owner.includes("pm_exec_path"), "PM2 ow
 assert(pm2Owner.includes("Normalize-PathValue") && pm2Owner.includes("-ine"), "PM2 owner helper must normalize paths before case-insensitive comparison");
 assert(pm2Owner.includes("PM2_OWNER=current") && pm2Owner.includes("PM2_OWNER=none") && pm2Owner.includes("PM2_OWNER=conflict"), "PM2 owner helper must classify ownership");
 assert(pm2Owner.includes("PM2_PIDS="), "PM2 owner helper must return exact PIDs for verified project apps");
+const pm2FixturePath = path.join(require("os").tmpdir(), `launcher-pm2-owner-${process.pid}.json`);
+try {
+  fs.writeFileSync(pm2FixturePath, JSON.stringify([{
+    name: "api-plus-webtools",
+    pid: 43210,
+    username: "lower-case-key",
+    USERNAME: "upper-case-key",
+    pm2_env: {
+      pm_cwd: __dirname,
+      pm_exec_path: projectServerPath,
+      username: "lower-case-env-key",
+      USERNAME: "upper-case-env-key"
+    }
+  }]), "utf8");
+  const fixtureOwner = execFileSync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", "launcher-pm2-owner.ps1",
+    "-NodeExe", process.execPath,
+    "-JsonFixturePath", pm2FixturePath,
+    "-ProjectRoot", __dirname,
+    "-ProjectServerPath", projectServerPath
+  ], { encoding: "utf8" });
+  assert(fixtureOwner.includes("PM2_OWNER=current"), "PM2 ownership parsing must tolerate case-distinct environment keys");
+  assert(fixtureOwner.includes("PM2_PIDS=43210"), "PM2 ownership parsing must preserve the verified PID");
+} finally {
+  fs.rmSync(pm2FixturePath, { force: true });
+}
 assert(start.includes("launcher-pm2-owner.ps1") && stop.includes("launcher-pm2-owner.ps1"), "launchers must use the PM2 ownership helper");
 assert(start.includes("PM2_OWNER") && start.includes("PM2_CONFLICT"), "start launcher must reject foreign PM2 ownership");
 assert(start.indexOf("PM2_CONFLICT") < start.indexOf("startOrReload ecosystem.config.cjs"), "PM2 ownership conflict must be checked before reload");
