@@ -18,6 +18,47 @@
       : ["480p", "720p", "1080p", "4k"];
   }
 
+  function nearestQualityOption(current, options, fallback = "") {
+    const available = Array.isArray(options) ? options.filter(Boolean) : [];
+    if (!available.length) return "";
+    if (available.includes(current)) return current;
+    const target = qualityHeight(current);
+    if (target !== null) {
+      return available.reduce((best, option) => {
+        const height = qualityHeight(option);
+        if (height === null) return best;
+        const distance = Math.abs(height - target);
+        const bestHeight = qualityHeight(best);
+        const bestDistance = bestHeight === null ? Number.POSITIVE_INFINITY : Math.abs(bestHeight - target);
+        return distance < bestDistance || (distance === bestDistance && height > bestHeight) ? option : best;
+      }, available[0]);
+    }
+    return available.includes(fallback) ? fallback : available[0];
+  }
+
+  function formatProviderError(value, fallback = "请求失败") {
+    if (typeof value === "string") return value.trim() || fallback;
+    if (!value || typeof value !== "object") return fallback;
+    const nested = value.error && typeof value.error === "object" ? value.error : null;
+    const message = firstText(
+      value.message,
+      value.msg,
+      typeof value.error === "string" ? value.error : "",
+      nested?.message,
+      value.detail?.[0]?.msg,
+      value.data?.message,
+      fallback
+    );
+    let details = "";
+    try {
+      details = JSON.stringify(value);
+    } catch {
+      details = "";
+    }
+    if (!details || details === "{}") return message;
+    return details.includes(message) ? details : `${message}\n${details}`;
+  }
+
   function validateKling3OmniRow(row = {}) {
     const refs = Array.isArray(row.refs) ? row.refs : [];
     if (refs.some(asset => asset?.type === "audio")) return "Kling 3 Omni 不支持普通音频参考，请先移除音频素材";
@@ -128,6 +169,21 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  function qualityHeight(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "4k") return 2160;
+    const match = normalized.match(/^(\d+)p$/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function firstText(...values) {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return "请求失败";
+  }
+
   function withinRatio(width, height, min, max) {
     return height > 0 && width / height >= min && width / height <= max;
   }
@@ -147,6 +203,8 @@
   return {
     KLING_3_OMNI,
     buildKling3OmniPayload,
+    formatProviderError,
+    nearestQualityOption,
     seedance2QualityOptions,
     validateKling3OmniRow
   };

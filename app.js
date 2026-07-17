@@ -8,7 +8,7 @@ const VIDEO_COMPRESS_MARGIN = 0.995;
 const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
-const { KLING_3_OMNI, seedance2QualityOptions } = MODEL_CONTRACTS;
+const { KLING_3_OMNI, formatProviderError, nearestQualityOption, seedance2QualityOptions } = MODEL_CONTRACTS;
 const STORAGE_KEYS = {
   apiBase: "api_console_api_base",
   activePage: "api_console_active_page",
@@ -528,6 +528,7 @@ const MULTI_VIDEO_MODELS = {
     defaultDuration: "5",
     durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
     maxRefs: 10,
+    prepareSeedanceReferences: true,
     validate() {
       return "";
     },
@@ -5097,7 +5098,6 @@ function bindAvatarRow(tr, row) {
   tr.querySelector(".submit-avatar-row").addEventListener("click", () => enqueueAvatarRows([row]));
   tr.querySelector(".cancel-avatar-row").addEventListener("click", () => cancelAvatarQueuedJobs(row.id));
   tr.querySelector(".duplicate-avatar-row").addEventListener("click", () => {
-    if (isAvatarRowLocked(row)) return;
     state.avatarRows.splice(state.avatarRows.indexOf(row) + 1, 0, createAvatarRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
     persistAvatarRows();
     render();
@@ -5191,7 +5191,6 @@ function bindMotionRow(tr, row) {
   tr.querySelector(".submit-motion-row").addEventListener("click", () => enqueueMotionRows([row]));
   tr.querySelector(".cancel-motion-row").addEventListener("click", () => cancelMotionQueuedJobs(row.id));
   tr.querySelector(".duplicate-motion-row").addEventListener("click", () => {
-    if (isMotionRowLocked(row)) return;
     state.motionRows.splice(state.motionRows.indexOf(row) + 1, 0, createMotionRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
     persistMotionRows();
     render();
@@ -5288,7 +5287,6 @@ function bindImageVideoRow(tr, row) {
   tr.querySelector(".submit-image-video-row").addEventListener("click", () => enqueueImageVideoRows([row]));
   tr.querySelector(".cancel-image-video-row").addEventListener("click", () => cancelImageVideoQueuedJobs(row.id));
   tr.querySelector(".duplicate-image-video-row").addEventListener("click", () => {
-    if (isImageVideoRowLocked(row)) return;
     state.imageVideoRows.splice(state.imageVideoRows.indexOf(row) + 1, 0, createImageVideoRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
     persistImageVideoRows();
     render();
@@ -5390,7 +5388,6 @@ function bindMultiRow(tr, row) {
   tr.querySelector(".submit-multi-row").addEventListener("click", () => enqueueMultiRows([row]));
   tr.querySelector(".cancel-multi-row").addEventListener("click", () => cancelMultiQueuedJobs(row.id));
   tr.querySelector(".duplicate-multi-row").addEventListener("click", () => {
-    if (isMultiRowLocked(row)) return;
     state.multiRows.splice(state.multiRows.indexOf(row) + 1, 0, createMultiRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
     persistMultiRows();
     render();
@@ -5485,7 +5482,6 @@ function bindViduRefRow(tr, row) {
   tr.querySelector(".submit-vidu-ref-row").addEventListener("click", () => enqueueViduRefRows([row]));
   tr.querySelector(".cancel-vidu-ref-row").addEventListener("click", () => cancelViduRefQueuedJobs(row.id));
   tr.querySelector(".duplicate-vidu-ref-row").addEventListener("click", () => {
-    if (isViduRefRowLocked(row)) return;
     state.viduRefRows.splice(state.viduRefRows.indexOf(row) + 1, 0, createViduRefRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "", returnedSeeds: [] }));
     persistViduRefRows();
     render();
@@ -5567,7 +5563,6 @@ function bindRow(tr, row) {
   tr.querySelector(".submit-row").addEventListener("click", () => enqueueRows([row]));
   tr.querySelector(".cancel-row").addEventListener("click", () => cancelQueuedJobs(row.id));
   tr.querySelector(".duplicate-row").addEventListener("click", () => {
-    if (isRowLocked(row)) return;
     state.rows.splice(state.rows.indexOf(row) + 1, 0, createRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
     persistRows();
     render();
@@ -5833,7 +5828,7 @@ function updateMultiRowField(row, field, value, redraw = true) {
     row.count = Math.max(1, Number(value || 1));
   } else if (field === "version") {
     row.version = value;
-    row.quality = chooseCompatibleOption(row.quality, getMultiQualityOptions(row), getMultiQualityOptions(row)[0] || "");
+    row.quality = nearestQualityOption(row.quality, getMultiQualityOptions(row), getMultiQualityOptions(row)[0] || "");
   } else if (field === "duration") {
     row.duration = String(value || "5");
   } else if (field === "generateAudio") {
@@ -7657,14 +7652,16 @@ async function uploadReferenceFiles(files, rowId) {
     let meta = await getFileMeta(file);
     let uploadFile = file;
     let compressedInfo = null;
-    try {
-      const prepared = await prepareSeedanceReferenceFile(file, meta);
-      uploadFile = prepared.file;
-      meta = prepared.meta;
-      compressedInfo = prepared.compressedInfo;
-    } catch (error) {
-      window.alert(`视频自动压缩失败: ${file.name} ${error.message}`);
-      continue;
+    if (getMultiModel(row).prepareSeedanceReferences) {
+      try {
+        const prepared = await prepareSeedanceReferenceFile(file, meta);
+        uploadFile = prepared.file;
+        meta = prepared.meta;
+        compressedInfo = prepared.compressedInfo;
+      } catch (error) {
+        window.alert(`视频自动压缩失败: ${file.name} ${error.message}`);
+        continue;
+      }
     }
     const form = new FormData();
     form.append("file", uploadFile);
@@ -8203,7 +8200,7 @@ async function processJob(job) {
     const response = await postJson(model.endpoint, payload, REQUEST_TIMEOUT_MS);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -8258,7 +8255,7 @@ async function pollTask(queryEndpoint, task, row, job) {
     const remainingMs = Math.max(1000, deadlineAt - Date.now());
     const response = await postJson(queryEndpoint, payload, remainingMs);
     if (row) row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "任务执行失败");
+    if (!response.success) throw new Error(formatProviderError(response, "任务执行失败"));
     if (response.data) return response.data;
     await sleep(POLL_INTERVAL_MS);
   }
@@ -8484,7 +8481,7 @@ async function processImageVideoJob(job) {
     const response = await postJson(model.endpoint, payload, REQUEST_TIMEOUT_MS);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -8653,7 +8650,7 @@ async function processMotionJob(job) {
     const { response, queryEndpoint } = await postMotionCreate(model, payload);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -8836,7 +8833,7 @@ async function processAvatarJob(job) {
     const { response, queryEndpoint } = await postAvatarCreate(row.model, model, payload);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -9034,7 +9031,7 @@ async function processMultiJob(job) {
     const response = await postJson(model.endpoint, payload, REQUEST_TIMEOUT_MS);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -9200,7 +9197,7 @@ async function processViduRefJob(job) {
     const { response, queryEndpoint } = await postViduRefCreate(payload);
     if (!isCurrentJob()) return;
     row.lastActivityAt = Date.now();
-    if (!response.success) throw new Error(response.message || "提交失败");
+    if (!response.success) throw new Error(formatProviderError(response, "提交失败"));
     appendViduRefSeed(row, extractSeed(response.data));
     const task = normalizeTask(response.data);
     if (!task.taskId) throw new Error("接口返回缺少 task_id");
@@ -11429,7 +11426,7 @@ async function postJson(endpoint, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
     } catch {
       throw new Error(text || `HTTP ${response.status}`);
     }
-    if (!response.ok) throw new Error(json.message || json.detail?.[0]?.msg || `HTTP ${response.status}`);
+    if (!response.ok) throw new Error(formatProviderError(json, `HTTP ${response.status}`));
     return normalizeApiResponseEnvelope(json);
   } catch (error) {
     if (error.name === "AbortError") {

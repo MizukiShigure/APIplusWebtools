@@ -3,7 +3,14 @@ const contracts = require("./model-contracts.js");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { KLING_3_OMNI, buildKling3OmniPayload, seedance2QualityOptions, validateKling3OmniRow } = contracts;
+const {
+  KLING_3_OMNI,
+  buildKling3OmniPayload,
+  formatProviderError,
+  nearestQualityOption,
+  seedance2QualityOptions,
+  validateKling3OmniRow
+} = contracts;
 
 function row(overrides = {}) {
   return {
@@ -29,6 +36,23 @@ assert.deepEqual(KLING_3_OMNI, {
 
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-260128"), ["480p", "720p", "1080p", "4k"]);
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-fast-260128"), ["480p", "720p"]);
+assert.equal(nearestQualityOption("4k", ["480p", "720p"]), "720p");
+assert.equal(nearestQualityOption("1080p", ["480p", "720p"]), "720p");
+assert.equal(nearestQualityOption("720p", ["480p", "720p"]), "720p");
+assert.equal(nearestQualityOption("", ["480p", "720p"], "720p"), "720p");
+
+const providerError = formatProviderError({
+  error: {
+    message: "Resource has been exhausted",
+    code: 429,
+    param: "quality",
+    request_id: "req-provider-123"
+  }
+}, "HTTP 429");
+assert.match(providerError, /Resource has been exhausted/);
+assert.match(providerError, /429/);
+assert.match(providerError, /quality/);
+assert.match(providerError, /req-provider-123/);
 
 const image = { type: "image", url: "https://cdn.example/image.png", width: 1200, height: 900, size: 1024 };
 const video = { type: "video", url: "https://cdn.example/clip.mov", width: 1280, height: 720, duration: 8, fps: 30, size: 2048 };
@@ -93,7 +117,7 @@ const imageVideoModelsSource = appSource.slice(
 );
 assert.match(multiVideoModelsSource, /kling3Omni:\s*\{[\s\S]*?supportsGenerateAudio:\s*true,/);
 assert.doesNotMatch(seedanceModelSource, /supportsGenerateAudio\s*:/);
-assert.match(appSource, /const \{ KLING_3_OMNI, seedance2QualityOptions \} = MODEL_CONTRACTS;/, "app must consume the Seedance 2 quality contract");
+assert.match(appSource, /const \{[^}]*KLING_3_OMNI[^}]*seedance2QualityOptions[^}]*\} = MODEL_CONTRACTS;/, "app must consume the Seedance 2 quality contract");
 assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}[\s\S]*?qualitiesFor\(row\)\s*\{\s*return row\.version === "doubao-seedance-2-0-260128" \? seedance2QualityOptions\(row\.version\) : this\.qualities;\s*\}/, "mixed Seedance image-video entry must delegate 2.0 qualities to the contract");
 assert.match(imageVideoModelsSource, /seedance2:\s*\{[\s\S]*?versions: \[\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}\][\s\S]*?qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "dedicated Seedance 2 image-video entry must delegate qualities to the contract");
 assert.match(seedanceModelSource, /qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "multimodal Seedance must delegate version qualities to the contract");
