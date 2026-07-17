@@ -179,6 +179,7 @@ async function runPortProbeChecks() {
     const fallback = invokePortQuery(["-SkipGetNetTcpConnection"], { port: fixture.port });
     assert(fallback.status === 0, `netstat fallback failed: ${fallback.stderr}`);
     assert(fallback.stdout.includes("HAS_OTHER_LISTENER=1"), "netstat fallback must detect an unrelated exact-port listener");
+    assert(!fallback.stdout.includes("TRUSTED_PROJECT_PIDS="), "an unrelated listener must not emit an empty trusted-PID record");
 
     const trusted = invokePortQuery([
       "-SkipGetNetTcpConnection",

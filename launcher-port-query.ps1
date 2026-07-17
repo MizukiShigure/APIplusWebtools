@@ -180,13 +180,13 @@ foreach ($trustedPidToken in @([string]$TrustedProjectPids -split ',')) {
 }
 
 $projectPids = @()
-$trustedProjectPids = @()
+$trustedListenerPids = @()
 $hasOtherListener = $false
 
 foreach ($ownerProcessId in $ownerProcessIds) {
   if ($trustedPidSet.Contains([int]$ownerProcessId)) {
     $projectPids += $ownerProcessId
-    $trustedProjectPids += $ownerProcessId
+    $trustedListenerPids += $ownerProcessId
     continue
   }
   $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerProcessId" -ErrorAction SilentlyContinue
@@ -203,8 +203,8 @@ if ($projectPids.Count -gt 0) {
   Write-Output "PROJECT_PIDS=$($projectPids -join ',')"
 }
 
-if ($trustedProjectPids.Count -gt 0) {
-  Write-Output "TRUSTED_PROJECT_PIDS=$($trustedProjectPids -join ',')"
+if ($trustedListenerPids.Count -gt 0) {
+  Write-Output "TRUSTED_PROJECT_PIDS=$($trustedListenerPids -join ',')"
 }
 
 if ($hasOtherListener) {
