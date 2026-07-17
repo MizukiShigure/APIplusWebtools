@@ -124,6 +124,15 @@ assert(pm2Owner.includes("PM2_PIDS="), "PM2 owner helper must return exact PIDs 
 const pm2FixturePath = path.join(require("os").tmpdir(), `launcher-pm2-owner-${process.pid}.json`);
 try {
   fs.writeFileSync(pm2FixturePath, JSON.stringify([{
+    name: "unrelated-service",
+    pid: 12345,
+    username: "lower-case-unrelated",
+    USERNAME: "upper-case-unrelated",
+    pm2_env: {
+      pm_cwd: path.join(path.dirname(__dirname), "unrelated-service"),
+      pm_exec_path: path.join(path.dirname(__dirname), "unrelated-service", "server.cjs")
+    }
+  }, {
     name: "api-plus-webtools",
     pid: 43210,
     username: "lower-case-key",

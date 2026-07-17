@@ -9,6 +9,8 @@ param(
   [string]$ProjectServerPath
 )
 
+$ErrorActionPreference = "Stop"
+
 function Normalize-PathValue([string]$PathValue) {
   if ([string]::IsNullOrWhiteSpace($PathValue)) { return "" }
   return [System.IO.Path]::GetFullPath($PathValue).TrimEnd([char[]]('\', '/'))
@@ -44,7 +46,10 @@ process.stdout.write(JSON.stringify(compact));
     [System.IO.File]::WriteAllText($temporaryParser, $parser, $utf8)
     $compactJson = & $NodeCommand $temporaryParser $temporaryJson 2>$null
     if ($LASTEXITCODE -ne 0) { throw "Node.js could not parse PM2 jlist" }
-    return @(($compactJson | Out-String) | ConvertFrom-Json)
+    $parsedApps = ($compactJson | Out-String) | ConvertFrom-Json
+    foreach ($parsedApp in @($parsedApps)) {
+      Write-Output $parsedApp
+    }
   } finally {
     Remove-Item -LiteralPath $temporaryJson -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporaryParser -Force -ErrorAction SilentlyContinue
@@ -88,14 +93,20 @@ if ($namedApps.Count -eq 0) {
 
 $expectedRoot = Normalize-PathValue $ProjectRoot
 $expectedServer = Normalize-PathValue $ProjectServerPath
-foreach ($app in $namedApps) {
-  $pm2Env = $app.pm2_env
-  $actualRoot = Normalize-PathValue ([string]$pm2Env.pm_cwd)
-  $actualServer = Normalize-PathValue ([string]$pm2Env.pm_exec_path)
-  if ($actualRoot -ine $expectedRoot -or $actualServer -ine $expectedServer) {
-    Write-Output "PM2_OWNER=conflict"
-    exit 0
+try {
+  foreach ($app in $namedApps) {
+    $pm2Env = $app.pm2_env
+    $actualRoot = Normalize-PathValue ([string]$pm2Env.pm_cwd)
+    $actualServer = Normalize-PathValue ([string]$pm2Env.pm_exec_path)
+    if ($actualRoot -ine $expectedRoot -or $actualServer -ine $expectedServer) {
+      Write-Output "PM2_OWNER=conflict"
+      exit 0
+    }
   }
+} catch {
+  Write-Output "PM2_ERROR=$($_.Exception.Message)"
+  Write-Output "PM2_OWNER=conflict"
+  exit 0
 }
 
 Write-Output "PM2_OWNER=current"
