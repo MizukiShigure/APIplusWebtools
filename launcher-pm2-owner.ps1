@@ -50,3 +50,5 @@ foreach ($app in $namedApps) {
 }
 
 Write-Output "PM2_OWNER=current"
+$verifiedPids = @($namedApps | ForEach-Object { [int]$_.pid } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+Write-Output "PM2_PIDS=$($verifiedPids -join ',')"

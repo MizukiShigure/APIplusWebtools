@@ -5,7 +5,10 @@ param(
   [switch]$ShowLegacyCommandLines,
   [switch]$ClassifyOnly,
   [string]$ClassifyProcessName,
-  [string]$ClassifyCommandLineBase64
+  [string]$ClassifyCommandLineBase64,
+  [switch]$SkipGetNetTcpConnection,
+  [string]$NetstatPath = "$env:SystemRoot\System32\netstat.exe",
+  [string]$TrustedProjectPids
 )
 
 if (-not ("LauncherCommandLineNative" -as [type])) {
@@ -68,9 +71,6 @@ function Get-LauncherProcessClassification {
   }
 
   $entryScript = $argv[1]
-  if ($entryScript -ieq "server.cjs") {
-    return "LEGACY"
-  }
   if (-not [System.IO.Path]::IsPathRooted($entryScript)) {
     return "OTHER"
   }
@@ -85,6 +85,41 @@ function Get-LauncherProcessClassification {
     return "PROJECT"
   }
   return "OTHER"
+}
+
+function Get-NetstatListenerPids {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ExecutablePath,
+    [Parameter(Mandatory = $true)]
+    [int]$LocalPort
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath) -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
+    throw "netstat.exe was not found"
+  }
+
+  $lines = @(& $ExecutablePath -ano -p TCP 2>$null)
+  if ($LASTEXITCODE -ne 0) {
+    throw "netstat.exe failed"
+  }
+
+  $listenerPids = @()
+  foreach ($line in $lines) {
+    if ([string]$line -notmatch '^\s*TCP\s+(?<LocalAddress>\S+)\s+\S+\s+LISTENING\s+(?<OwningProcess>\d+)\s*$') {
+      continue
+    }
+    $localAddress = [string]$Matches.LocalAddress
+    $ownerProcessId = [int]$Matches.OwningProcess
+    if ($localAddress -notmatch ':(?<LocalPort>\d+)$') {
+      continue
+    }
+    if ([int]$Matches.LocalPort -eq $LocalPort) {
+      $listenerPids += $ownerProcessId
+    }
+  }
+
+  return @($listenerPids | Sort-Object -Unique)
 }
 
 $expectedPath = [System.IO.Path]::GetFullPath($ProjectServerPath)
@@ -103,21 +138,62 @@ if ($Port -lt 1 -or $Port -gt 65535) {
   throw "Port must be between 1 and 65535"
 }
 
-$connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+$primaryProbeSucceeded = $false
+$netstatProbeSucceeded = $false
+$ownerProcessIds = @()
+
+if (-not $SkipGetNetTcpConnection) {
+  try {
+    [void](Get-Command Get-NetTCPConnection -ErrorAction Stop)
+    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
+    $primaryProbeSucceeded = $true
+    $ownerProcessIds = @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+  } catch {
+    $primaryProbeSucceeded = $false
+  }
+}
+
+# An empty primary result is confirmed with netstat because NetTCPIP can be
+# unavailable or access-limited in non-elevated Windows sessions.
+if (-not $primaryProbeSucceeded -or $ownerProcessIds.Count -eq 0) {
+  try {
+    $ownerProcessIds = @(Get-NetstatListenerPids -ExecutablePath $NetstatPath -LocalPort $Port)
+    $netstatProbeSucceeded = $true
+  } catch {
+    $netstatProbeSucceeded = $false
+  }
+}
+
+$querySucceeded = ($primaryProbeSucceeded -and $ownerProcessIds.Count -gt 0) -or $netstatProbeSucceeded
+if (-not $querySucceeded) {
+  Write-Output "QUERY_FAILED=1"
+  Write-Output "HAS_OTHER_LISTENER=1"
+  exit 2
+}
+
+$trustedPidSet = [System.Collections.Generic.HashSet[int]]::new()
+foreach ($trustedPidToken in @([string]$TrustedProjectPids -split ',')) {
+  $trustedPid = 0
+  if ([int]::TryParse($trustedPidToken.Trim(), [ref]$trustedPid) -and $trustedPid -gt 0) {
+    [void]$trustedPidSet.Add($trustedPid)
+  }
+}
+
 $projectPids = @()
-$legacyPids = @()
-$legacyListeners = @()
+$trustedProjectPids = @()
 $hasOtherListener = $false
 
-foreach ($ownerProcessId in @($connections | Select-Object -ExpandProperty OwningProcess -Unique)) {
+foreach ($ownerProcessId in $ownerProcessIds) {
+  if ($trustedPidSet.Contains([int]$ownerProcessId)) {
+    $projectPids += $ownerProcessId
+    $trustedProjectPids += $ownerProcessId
+    continue
+  }
   $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerProcessId" -ErrorAction SilentlyContinue
   $commandLine = [string]$process.CommandLine
   $classification = Get-LauncherProcessClassification -ProcessName $process.Name -CommandLine $commandLine -ExpectedProjectServerPath $expectedPath
   if ($classification -eq "PROJECT") {
     $projectPids += $ownerProcessId
-  } elseif ($classification -eq "LEGACY") {
-    $legacyPids += $ownerProcessId
-    $legacyListeners += [pscustomobject]@{ Pid = $ownerProcessId; CommandLine = $commandLine }
   } else {
     $hasOtherListener = $true
   }
@@ -127,16 +203,10 @@ if ($projectPids.Count -gt 0) {
   Write-Output "PROJECT_PIDS=$($projectPids -join ',')"
 }
 
-if ($legacyPids.Count -gt 0) {
-  Write-Output "LEGACY_PIDS=$($legacyPids -join ',')"
+if ($trustedProjectPids.Count -gt 0) {
+  Write-Output "TRUSTED_PROJECT_PIDS=$($trustedProjectPids -join ',')"
 }
 
 if ($hasOtherListener) {
   Write-Output "HAS_OTHER_LISTENER=1"
-}
-
-if ($ShowLegacyCommandLines) {
-  foreach ($legacyListener in $legacyListeners) {
-    Write-Output "Legacy PID $($legacyListener.Pid): $($legacyListener.CommandLine)"
-  }
 }

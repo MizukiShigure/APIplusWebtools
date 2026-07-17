@@ -1,5 +1,6 @@
 const fs = require("fs");
-const { execFileSync } = require("child_process");
+const path = require("path");
+const { execFileSync, spawn, spawnSync } = require("child_process");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -38,6 +39,39 @@ function classifyLauncherProcess(processName, commandLine) {
   ], { encoding: "utf8" }).trim();
 }
 
+function invokePortQuery(extraArgs = [], options = {}) {
+  return spawnSync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", "launcher-port-query.ps1",
+    "-Port", String(options.port || 61998),
+    "-ProjectServerPath", projectServerPath,
+    ...extraArgs
+  ], { encoding: "utf8" });
+}
+
+function startTcpListenerFixture() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "-e",
+      "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>console.log(s.address().port));"
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("exit", code => reject(new Error(`listener fixture exited early (${code}): ${stderr}`)));
+    child.stdout.once("data", chunk => {
+      const port = Number(String(chunk).trim());
+      if (!Number.isInteger(port) || port < 1) {
+        child.kill();
+        reject(new Error(`listener fixture returned invalid port: ${chunk}`));
+        return;
+      }
+      resolve({ child, port });
+    });
+  });
+}
+
 assert(Array.isArray(ecosystem.apps) && ecosystem.apps.length === 1, "PM2 config must define one app");
 const app = ecosystem.apps[0];
 assert(app.name === "api-plus-webtools", "PM2 app name must be api-plus-webtools");
@@ -63,15 +97,20 @@ assert(!start.includes('findstr ":%PORT%"') && !stop.includes('findstr ":%PORT%"
 assert(portQuery, "launcher-port-query.ps1 is missing");
 assert(start.includes("launcher-port-query.ps1") && stop.includes("launcher-port-query.ps1"), "launchers must use the exact-port query helper");
 assert(portQuery.includes("Get-NetTCPConnection -State Listen -LocalPort"), "port query must use exact listening TCP port lookup");
+assert(portQuery.includes("netstat.exe"), "port query must fall back to exact netstat listener parsing");
+assert(portQuery.includes("QUERY_FAILED=1"), "port query must report an explicit fail-closed state when all probes fail");
+assert(portQuery.includes("SkipGetNetTcpConnection") && portQuery.includes("NetstatPath"), "port query must expose diagnostic controls for fallback regression coverage");
+assert(portQuery.includes("TRUSTED_PROJECT_PIDS="), "port query must identify listeners that match verified PM2 PIDs separately");
+assert(!portQuery.includes("Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue"), "primary port lookup failures must not be silently treated as an empty port");
 assert(portQuery.includes("Get-CimInstance Win32_Process"), "port query must inspect listener command lines");
 assert(portQuery.includes('$ProcessName -ieq "node.exe"'), "port query must only classify node.exe listeners as project or legacy servers");
 assert(!portQuery.includes("IndexOf("), "port query must not use substring command ownership checks");
 assert(portQuery.includes("CommandLineToArgvW"), "port query must parse Windows command lines into argv");
 assert(portQuery.includes("ClassifyOnly") && portQuery.includes("argv[1]"), "port query must expose argv[1] entry-script classification");
-assert(portQuery.includes("ShowLegacyCommandLines") && portQuery.includes("Legacy PID"), "port query must expose legacy command lines for confirmation");
 const quotedNode = '"C:\\Program Files\\nodejs\\node.exe"';
 assert(classifyLauncherProcess("node.exe", `${quotedNode} "${projectServerPath}"`) === "PROJECT", "absolute current-project entry script must be classified as project");
-assert(classifyLauncherProcess("node.exe", `${quotedNode} server.cjs`) === "LEGACY", "bare server.cjs entry script must be classified as legacy");
+assert(classifyLauncherProcess("node.exe", `${quotedNode} server.cjs`) === "OTHER", "bare server.cjs must remain unowned because its process working directory is unknown");
+assert(classifyLauncherProcess("node.exe", `${quotedNode} "${path.join(path.dirname(__dirname), "foreign-project", "server.cjs")}"`) === "OTHER", "another project's absolute server.cjs must not be classified as current project");
 assert(classifyLauncherProcess("node.exe", `${quotedNode} other.cjs --config "${projectServerPath}"`) === "OTHER", "a config argument must not be mistaken for the Node entry script");
 assert(classifyLauncherProcess("node.exe", `${quotedNode} myserver.cjs`) === "OTHER", "myserver.cjs must not be classified as legacy");
 assert(classifyLauncherProcess("python.exe", `${quotedNode} "${projectServerPath}"`) === "OTHER", "non-Node listeners must be classified as other");
@@ -81,15 +120,28 @@ assert(pm2Owner.includes("$Pm2Cmd") && pm2Owner.includes("$Pm2Js") && pm2Owner.i
 assert(pm2Owner.includes("pm_cwd") && pm2Owner.includes("pm_exec_path"), "PM2 owner helper must verify cwd and exec path");
 assert(pm2Owner.includes("Normalize-PathValue") && pm2Owner.includes("-ine"), "PM2 owner helper must normalize paths before case-insensitive comparison");
 assert(pm2Owner.includes("PM2_OWNER=current") && pm2Owner.includes("PM2_OWNER=none") && pm2Owner.includes("PM2_OWNER=conflict"), "PM2 owner helper must classify ownership");
+assert(pm2Owner.includes("PM2_PIDS="), "PM2 owner helper must return exact PIDs for verified project apps");
 assert(start.includes("launcher-pm2-owner.ps1") && stop.includes("launcher-pm2-owner.ps1"), "launchers must use the PM2 ownership helper");
 assert(start.includes("PM2_OWNER") && start.includes("PM2_CONFLICT"), "start launcher must reject foreign PM2 ownership");
 assert(start.indexOf("PM2_CONFLICT") < start.indexOf("startOrReload ecosystem.config.cjs"), "PM2 ownership conflict must be checked before reload");
 assert(start.indexOf('if /I "%PM2_OWNER%"=="current"') < start.indexOf("startOrReload ecosystem.config.cjs"), "start must verify current PM2 ownership before reload");
+const pm2OwnerQueryIndex = start.indexOf("call :QUERY_PM2_OWNER");
+const preflightListenerQueryIndex = start.indexOf("call :QUERY_LISTENER", pm2OwnerQueryIndex);
+const currentPm2RouteIndex = start.indexOf('if /I "%PM2_OWNER%"=="current" goto START_PM2');
+const pm2ReloadIndex = start.indexOf("startOrReload ecosystem.config.cjs");
+const postReloadListenerQueryIndex = start.indexOf("call :QUERY_LISTENER", pm2ReloadIndex);
+const openPageLabelIndex = start.indexOf(":OPEN_PAGE");
+assert(preflightListenerQueryIndex > pm2OwnerQueryIndex && preflightListenerQueryIndex < pm2ReloadIndex, "PM2 startup must inspect the requested port before reload");
+assert(currentPm2RouteIndex > preflightListenerQueryIndex, "an owned PM2 app must pass requested-port inspection before startup");
+assert(postReloadListenerQueryIndex > pm2ReloadIndex && postReloadListenerQueryIndex < openPageLabelIndex, "PM2 startup must verify its requested-port listener before reporting success");
+const postReloadVerification = start.slice(postReloadListenerQueryIndex, openPageLabelIndex);
+assert(postReloadVerification.includes("if defined TRUSTED_PROJECT_PIDS goto OPEN_PAGE"), "PM2 startup must require its verified PID to own the requested listener");
+assert(!postReloadVerification.includes("if defined PROJECT_PIDS goto OPEN_PAGE"), "an unmanaged project fallback must not impersonate successful PM2 startup");
+assert(start.includes("QUERY_FAILED") && start.includes("PORT_CHECK_FAILED"), "launcher must stop with a clear error when listener detection cannot be trusted");
+assert(start.includes("PM2_PIDS") && start.includes("TrustedProjectPids"), "listener verification must trust only PIDs returned by the exact PM2 ownership check");
 assert(start.includes("HAS_OTHER_LISTENER") && start.includes("Port %PORT% is already in use by another program."), "launcher must reject unrelated listener conflicts");
 assert(start.includes("PROJECT_PIDS") && start.includes("taskkill /PID %%P /F"), "launcher must replace only the current project fallback before PM2 start");
-assert(portQuery.includes("LEGACY_PIDS") && portQuery.includes("LEGACY"), "port query must classify bare legacy server commands separately");
-assert(start.includes("LEGACY_PIDS") && start.includes("choice /C YN"), "start launcher must require confirmation before migrating legacy listeners");
-assert(start.indexOf("call :SHOW_LEGACY_COMMAND_LINES") < start.indexOf("choice /C YN"), "start must show legacy command lines before confirmation");
+assert(!portQuery.includes('return "LEGACY"'), "port query must never claim ownership of a relative server.cjs command");
 assert(!scripts.includes(personalNodePath), "launchers must not contain a personal user path");
 assert(!scripts.toLowerCase().includes(codexRuntimePath), "launchers must not contain Codex runtime paths");
 
@@ -113,4 +165,37 @@ assert(packageJson.scripts.test.includes("launcher-contract.test.cjs"), "package
 assert(readRequired("Make_Portable_Package.bat").includes("launcher-port-query.ps1"), "portable package must include the exact-port helper");
 assert(readRequired("Make_Portable_Package.bat").includes("launcher-pm2-owner.ps1"), "portable package must include the PM2 owner helper");
 
-console.log("launcher contract checks passed");
+async function runPortProbeChecks() {
+  const failClosed = invokePortQuery([
+    "-SkipGetNetTcpConnection",
+    "-NetstatPath", path.join(__dirname, "missing-netstat.exe")
+  ]);
+  assert(failClosed.status !== 0, "port query must exit non-zero when no reliable listener probe is available");
+  assert(failClosed.stdout.includes("QUERY_FAILED=1"), "failed port query must emit QUERY_FAILED=1");
+  assert(failClosed.stdout.includes("HAS_OTHER_LISTENER=1"), "failed port query must fail closed as an occupied/untrusted port");
+
+  const fixture = await startTcpListenerFixture();
+  try {
+    const fallback = invokePortQuery(["-SkipGetNetTcpConnection"], { port: fixture.port });
+    assert(fallback.status === 0, `netstat fallback failed: ${fallback.stderr}`);
+    assert(fallback.stdout.includes("HAS_OTHER_LISTENER=1"), "netstat fallback must detect an unrelated exact-port listener");
+
+    const trusted = invokePortQuery([
+      "-SkipGetNetTcpConnection",
+      "-TrustedProjectPids", String(fixture.child.pid)
+    ], { port: fixture.port });
+    assert(trusted.status === 0, `trusted PID lookup failed: ${trusted.stderr}`);
+    assert(trusted.stdout.includes(`PROJECT_PIDS=${fixture.child.pid}`), "a verified PM2 PID must be recognized as a project listener");
+    assert(trusted.stdout.includes(`TRUSTED_PROJECT_PIDS=${fixture.child.pid}`), "a verified PM2 PID must remain distinguishable from an unmanaged project listener");
+    assert(!trusted.stdout.includes("HAS_OTHER_LISTENER=1"), "a verified PM2 listener must not be reported as foreign");
+  } finally {
+    fixture.child.kill();
+  }
+}
+
+runPortProbeChecks()
+  .then(() => console.log("launcher contract checks passed"))
+  .catch(error => {
+    console.error(error.stack || error);
+    process.exitCode = 1;
+  });
