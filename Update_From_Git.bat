@@ -3,8 +3,8 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 if not exist ".git" (
-  echo This folder is not a Git checkout.
-  echo To use update pulling, clone the repository first:
+  echo This portable ZIP install does not include Git history.
+  echo Git clone is required to pull updates:
   echo git clone git@github.com:MizukiShigure/APIplusWebtools.git
   pause
   exit /b 1

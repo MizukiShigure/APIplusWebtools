@@ -3,7 +3,9 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 if not exist ".git" (
-  echo This folder is not a Git checkout.
+  echo This portable ZIP install does not include Git history.
+  echo Git clone is required to restore a version:
+  echo git clone git@github.com:MizukiShigure/APIplusWebtools.git
   pause
   exit /b 1
 )
@@ -18,7 +20,7 @@ if errorlevel 1 (
 echo Available versions:
 git tag --sort=-creatordate
 echo.
-set /p "TARGET_TAG=Type version tag to restore, for example v2026.07.16-portable.1: "
+set /p "TARGET_TAG=Type version tag to restore, for example v2026.07.16-omni-ui.1: "
 if "%TARGET_TAG%"=="" (
   echo No version selected.
   pause

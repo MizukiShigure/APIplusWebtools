@@ -16,6 +16,20 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
   $OutputPath = Join-Path (Get-Location).Path $OutputPath
 }
 
+try {
+  $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+} catch {
+  throw "OutputPath is invalid: $OutputPath"
+}
+
+if ([System.IO.Path]::GetExtension($OutputPath) -ine ".zip") {
+  throw "OutputPath must use a .zip extension."
+}
+
+if (Test-Path -LiteralPath $OutputPath -PathType Container) {
+  throw "OutputPath must be a ZIP file, not a directory."
+}
+
 $outputDirectory = Split-Path -Parent $OutputPath
 if ([string]::IsNullOrWhiteSpace($outputDirectory)) {
   throw "OutputPath must include a directory."
@@ -46,6 +60,7 @@ $publicFiles = @(
 )
 
 $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("internal-api-batch-portable-" + [guid]::NewGuid().ToString("N"))
+$temporaryArchive = Join-Path ([System.IO.Path]::GetTempPath()) ("internal-api-batch-portable-" + [guid]::NewGuid().ToString("N") + ".zip")
 
 try {
   New-Item -ItemType Directory -Path $stage | Out-Null
@@ -75,16 +90,20 @@ try {
     New-Item -ItemType File -Path (Join-Path $keepDirectory ".keep") -Force | Out-Null
   }
 
-  New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-  if (Test-Path -LiteralPath $OutputPath) {
-    Remove-Item -LiteralPath $OutputPath -Force
+  $archiveItems = @(Get-ChildItem -LiteralPath $stage -Force | Select-Object -ExpandProperty FullName)
+  Compress-Archive -LiteralPath $archiveItems -DestinationPath $temporaryArchive -Force
+  if (-not (Test-Path -LiteralPath $temporaryArchive -PathType Leaf)) {
+    throw "Portable archive build did not produce a ZIP file."
   }
 
-  $archiveItems = @(Get-ChildItem -LiteralPath $stage -Force | Select-Object -ExpandProperty FullName)
-  Compress-Archive -LiteralPath $archiveItems -DestinationPath $OutputPath -Force
+  New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+  Copy-Item -LiteralPath $temporaryArchive -Destination $OutputPath -Force
   Write-Output "Wrote $OutputPath"
 } finally {
   if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
+  }
+  if (Test-Path -LiteralPath $temporaryArchive) {
+    Remove-Item -LiteralPath $temporaryArchive -Force
   }
 }

@@ -81,16 +81,16 @@ const RUNNINGHUB_NODE_BINDINGS = {
   size: "表格尺寸"
 };
 const DEFAULT_RUNNINGHUB_MOTION_CONFIG = {
-  id: "rh_motion_1975951975441412098",
-  title: "RunningHub 动作模仿",
+  id: "rh_motion_default",
+  title: "RunningHub 工作流",
   source: "manual",
   workflowType: "motion",
-  webappId: "1975951975441412098",
+  webappId: "",
   endpoint: "/api/runninghub/run",
   queryEndpoint: "/api/runninghub/query",
-  sourceUrl: "https://www.runninghub.ai/zh-cn/ai-detail/1975951975441412098",
+  sourceUrl: "",
   nodeInfoList: "",
-  clientId: "25c98e4ce709d41793c66fef5a68744f",
+  clientId: "",
   instanceType: "plus",
   usePersonalQueue: false,
   retainSeconds: "",
@@ -683,7 +683,7 @@ const MOTION_MODELS = {
       return runningHubMotionConfig().queryEndpoint || DEFAULT_RUNNINGHUB_MOTION_CONFIG.queryEndpoint;
     },
     async: true,
-    versions: [{ label: "1975951975441412098", value: "1975951975441412098" }],
+    versions: [{ label: "RunningHub", value: "" }],
     sizes: ["16:9", "9:16", "1:1"],
     qualities: ["默认"],
     build(row) {
@@ -1058,7 +1058,7 @@ function normalizeRunningHubMotionConfig(value) {
     ...DEFAULT_RUNNINGHUB_MOTION_CONFIG,
     ...source,
     id: String(source.id || `rh_motion_${webappId || Date.now()}`),
-    title: String(source.title || source.name || `RunningHub ${webappId}`),
+    title: String(source.title || source.name || (webappId ? `RunningHub ${webappId}` : DEFAULT_RUNNINGHUB_MOTION_CONFIG.title)),
     source: source.source || (source.nodeInfoList ? "imported" : "manual"),
     workflowType: source.workflowType || DEFAULT_RUNNINGHUB_MOTION_CONFIG.workflowType,
     webappId,
@@ -2288,7 +2288,7 @@ function renderRunningHubMotionConfigWizard() {
             </label>
             <label class="field wide-field">
               <span>工作流链接</span>
-              <input data-runninghub-motion-field="sourceUrl" value="${escapeAttr(config.sourceUrl || "")}" spellcheck="false" placeholder="https://www.runninghub.ai/zh-cn/ai-detail/1975951975441412098">
+              <input data-runninghub-motion-field="sourceUrl" value="${escapeAttr(config.sourceUrl || "")}" spellcheck="false" placeholder="https://www.runninghub.ai/zh-cn/ai-detail/&lt;webappId&gt;">
             </label>
             <label class="field">
               <span>webappId</span>
@@ -2317,12 +2317,12 @@ function renderRunningHubMotionConfigWizard() {
             </label>
             <label class="field wide-field">
               <span>AI 应用网页链接</span>
-              <input id="runningHubImportUrl" value="${escapeAttr(state.runningHubMotionConfigUrl || config.sourceUrl || "")}" spellcheck="false" placeholder="https://www.runninghub.ai/zh-cn/ai-detail/1975951975441412098">
+              <input id="runningHubImportUrl" value="${escapeAttr(state.runningHubMotionConfigUrl || config.sourceUrl || "")}" spellcheck="false" placeholder="https://www.runninghub.ai/zh-cn/ai-detail/&lt;webappId&gt;">
             </label>
           </div>
           <label class="field">
             <span>Payload JSON</span>
-            <textarea id="runningHubImportPayload" rows="10" spellcheck="false" placeholder='{"webappId":"1975951975441412098","inputs":[...]}' >${escapeHtml(state.runningHubMotionConfigPayload || "")}</textarea>
+            <textarea id="runningHubImportPayload" rows="10" spellcheck="false" placeholder='{"webappId":"&lt;webappId&gt;","inputs":[...]}' >${escapeHtml(state.runningHubMotionConfigPayload || "")}</textarea>
           </label>
           <div class="dialog-actions">
             <button id="createRunningHubConfigFromPayload" class="button primary" type="button">解析为新配置</button>
