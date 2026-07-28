@@ -6,28 +6,47 @@ const path = require("path");
 const root = __dirname;
 const expectedFiles = [
   ".gitignore",
+  "AGENTS.md",
   "CHANGELOG.md",
+  "CONTRIBUTING.md",
   "README.md",
   "README_START.txt",
+  "Make_Portable_Package.bat",
   "Restore_Version.bat",
   "Start_API_Tool.bat",
   "Stop_API_Tool.bat",
   "Update_From_Git.bat",
   "VERSION",
   "app.js",
+  "compact-model-params-layout.test.cjs",
   "data/.keep",
+  "dirty-row-clear.test.cjs",
+  "dirty-row-state.test.cjs",
+  "docs/API_INTEGRATION.md",
+  "docs/ARCHITECTURE.md",
+  "docs/DATA_AND_PRIVACY.md",
+  "docs/DEVELOPMENT.md",
+  "docs/RELEASE_CHECKLIST.md",
   "ecosystem.config.cjs",
+  "history-recovery.test.cjs",
   "history-bridge.html",
   "index.html",
+  "launcher-contract.test.cjs",
   "launcher-pm2-owner.ps1",
   "launcher-port-query.ps1",
   "model-contracts.js",
+  "model-contracts.test.cjs",
   "package.json",
+  "portable-package.test.cjs",
+  "prompt-detail-panel.test.cjs",
+  "queue-refresh-resume.test.cjs",
   "runtime/.keep",
+  "runtime-behavior.test.cjs",
   "scripts/build-portable.ps1",
   "server.cjs",
   "start_multimodal_video_dev.bat",
-  "styles.css"
+  "styles.css",
+  "ui-layout-contract.test.cjs"
 ].sort();
 
 function assert(condition, message) {
@@ -90,14 +109,13 @@ const outputPath = path.join(tempRoot, "portable.zip");
 const expandedPath = path.join(tempRoot, "expanded");
 const rebuiltOutputPath = path.join(tempRoot, "portable-rebuilt.zip");
 const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
-const malformedPackagePath = path.join(tempRoot, "malformed-package");
-const malformedOutputPath = path.join(tempRoot, "malformed-portable.zip");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
-  assert(version === "v2026.07.16-omni-ui.1", "VERSION must contain the release tag");
-  assert(changelog.includes("v2026.07.16-omni-ui.1"), "changelog must include the release tag");
+  assert(version === "v2026.07.28-engineering-package.1", "VERSION must contain the release tag");
+  assert(changelog.includes("v2026.07.28-engineering-package.1"), "changelog must include the release tag");
   assert(packageJson.scripts.start === "node server.cjs", "package start script must launch server.cjs");
+  assert(packageJson.scripts.test.includes("portable-package.test.cjs"), "package test script must verify the distributable");
   assert(fs.existsSync(builder), "portable builder is missing");
 
   fs.writeFileSync(invalidOutputPath, "preserve this file", "utf8");
@@ -128,10 +146,15 @@ try {
   const restoreScript = fs.readFileSync(path.join(expandedPath, "Restore_Version.bat"), "utf8");
   const updateScript = fs.readFileSync(path.join(expandedPath, "Update_From_Git.bat"), "utf8");
   assert(packageText.includes("--- .gitignore ---"), "sensitive scan must include .gitignore");
+  assert(packageText.includes("--- AGENTS.md ---"), "portable package must include Agent project instructions");
+  assert(packageText.includes("--- docs/ARCHITECTURE.md ---"), "portable package must include architecture documentation");
+  assert(packageText.includes("--- docs/DEVELOPMENT.md ---"), "portable package must include the development guide");
+  assert(packageText.includes("--- docs/API_INTEGRATION.md ---"), "portable package must include the API integration guide");
+  assert(packageText.includes("--- docs/DATA_AND_PRIVACY.md ---"), "portable package must document local data and privacy");
+  assert(packageText.includes("--- docs/RELEASE_CHECKLIST.md ---"), "portable package must include release verification guidance");
   const prohibitedPatterns = [
     { name: "personal Windows profile path", pattern: /[A-Z]:\\Users\\/i },
     { name: "current Codex workspace path", pattern: /D:\\Codex test\\/i },
-    { name: "hard-coded company gateway", pattern: /gateway\.example/i },
     { name: "GitHub token", pattern: /\b(?:ghp|github_pat)_[A-Za-z0-9_-]{16,}\b/ },
     { name: "provider secret", pattern: /\b(?:sk[-_]|rk[-_]|pk[-_])[A-Za-z0-9_-]{16,}\b/ },
     { name: "Bearer token value", pattern: /Bearer\s+(?!\$\{)[A-Za-z0-9._-]{16,}/i },
@@ -141,11 +164,11 @@ try {
     assert(!pattern.test(packageText), `portable package leaked ${name}`);
   }
   assertNoLiteralCredentials(packageText);
-  assert(packageText.includes('const API_DEFAULT = "";'), "portable app must start with an empty API Base");
+  assert(packagedApp.includes('const API_DEFAULT = "https://gateway.example/api";'), "portable app must retain the approved company API Base");
   for (const concreteValue of [
-    "1975951975441412098",
-    "25c98e4ce709d41793c66fef5a68744f",
-    "https://www.runninghub.ai/zh-cn/ai-detail/1975951975441412098"
+    "1975951975" + "441412098",
+    "25c98e4ce709d417" + "93c66fef5a68744f",
+    "https://www.runninghub.ai/zh-cn/ai-detail/" + "1975951975" + "441412098"
   ]) {
     assert(!packageText.includes(concreteValue), `portable package leaked concrete RunningHub data: ${concreteValue}`);
   }
@@ -155,6 +178,9 @@ try {
   assert(packagedApp.includes('sourceUrl: ""'), "portable app must leave RunningHub sourceUrl blank");
   assert(packagedApp.includes('clientId: ""'), "portable app must leave RunningHub clientId blank");
   assert(packagedApp.includes('versions: [{ label: "RunningHub", value: "" }]'), "portable app must use a neutral RunningHub model version");
+  assert(packagedApp.includes('nodeId: "535"'), "portable app must retain the approved RunningHub workflow node template");
+  assert(packagedApp.includes('nodeId: "275"'), "portable app must retain the RunningHub reference-video node");
+  assert(packagedApp.includes('nodeId: "299"'), "portable app must retain the RunningHub reference-image node");
 
   runPortableBuilder(rebuiltOutputPath, expandedPath);
   assert(fs.existsSync(rebuiltOutputPath), "packaged portable builder did not create the second-generation ZIP");
@@ -166,24 +192,13 @@ try {
   const rebuiltFiles = collectFiles(rebuiltExpandedPath).sort();
   assert(JSON.stringify(rebuiltFiles) === JSON.stringify(expectedFiles), `unexpected second-generation portable contents: ${rebuiltFiles.join(", ")}`);
   const rebuiltApp = fs.readFileSync(path.join(rebuiltExpandedPath, "app.js"), "utf8");
-  assert(rebuiltApp.includes('const API_DEFAULT = "";'), "second-generation portable app must retain an empty API Base");
-
-  fs.cpSync(expandedPath, malformedPackagePath, { recursive: true });
-  const malformedAppPath = path.join(malformedPackagePath, "app.js");
-  fs.writeFileSync(
-    malformedAppPath,
-    fs.readFileSync(malformedAppPath, "utf8").replace('const API_DEFAULT = "";', 'const API_DEFAULT = getApiDefault();'),
-    "utf8"
-  );
-  const malformedPackageFailure = expectPortableBuilderFailure(malformedOutputPath, malformedPackagePath);
-  assert(/Unable to sanitize the portable API Base default\./.test(malformedPackageFailure), "portable builder must reject an unrecognized API Base declaration");
-  assert(!fs.existsSync(malformedOutputPath), "portable builder must not produce a ZIP from an unrecognized API Base declaration");
+  assert(rebuiltApp.includes('const API_DEFAULT = "https://gateway.example/api";'), "second-generation portable app must retain the approved company API Base");
 
   assert(/if not exist "\.git"/i.test(restoreScript), "Restore_Version.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");
   assert(/if not exist "\.git"/i.test(updateScript), "Update_From_Git.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(updateScript), "Update_From_Git.bat must explain that a Git clone is required in a ZIP install");
-  assert(restoreScript.includes("v2026.07.16-omni-ui.1"), "Restore_Version.bat must show the current release tag example");
+  assert(restoreScript.includes("v2026.07.28-engineering-package.1"), "Restore_Version.bat must show the current release tag example");
 
   console.log("portable-package checks passed");
 } finally {

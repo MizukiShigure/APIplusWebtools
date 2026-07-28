@@ -1,5 +1,15 @@
 # Changelog
 
+## v2026.07.28-engineering-package.1
+
+- Added a complete engineering handoff: Agent guide, architecture, development, API integration, data/privacy, contribution, and release documentation.
+- Expanded the privacy-clean portable ZIP so the same package can be launched by end users or developed and tested by engineers and coding agents.
+- Added package contracts that require all public docs and tests while continuing to exclude local history, credentials, logs, personal workflow settings, and machine paths.
+- Added `npm run package` as the supported command-line package build.
+- Preserved remote asynchronous task IDs across refresh and resumed polling without submitting duplicate create requests.
+- Kept the approved company API Base and built-in RunningHub node template as tool defaults while excluding user-imported workflows, credentials, prompts, queues, and history from the portable package.
+- Kept the existing localStorage, IndexedDB, and disk history compatibility contract.
+
 ## v2026.07.16-omni-ui.1
 
 - Added the Kling 3.0 Omni multimodal-video request contract and provider-aware reference handling.

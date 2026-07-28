@@ -990,6 +990,8 @@ const state = {
   avatarQueue: [],
   avatarRunning: 0,
   copiedImages: [],
+  resumeQueue: [],
+  resumeRunning: 0,
   copiedRefs: [],
   choosingRowId: null,
   assetFilter: "image",
@@ -1564,33 +1566,57 @@ function normalizeRows(value) {
 
 function recoverInterruptedRow(row) {
   const wasActive = ["queued", "running", "partial"].includes(row.status);
-  const wasAutoFailed = row.status === "failed" && /页面刷新或任务中断/.test(row.error || "");
-  if (!wasActive && !wasAutoFailed) return;
+  const wasAutoFailed = row.status === "failed" && /\u9875\u9762\u5237\u65b0(?:\u6216\u4efb\u52a1)?\u4e2d\u65ad/.test(row.error || "");
+  const knownRemoteTasks = remoteTasksForRow(row);
+  const wasLegacyReleased = row.status === "pending"
+    && knownRemoteTasks.length > 0
+    && /\u9875\u9762\u5237\u65b0\u4e2d\u65ad\u672c\u5730\u961f\u5217/.test(row.error || "");
+  if (!wasActive && !wasAutoFailed && !wasLegacyReleased) return;
   const hadResults = Array.isArray(row.results) && row.results.length > 0;
   const lastActivityAt = Number(row.lastActivityAt || row.startedAt || 0);
   const isActuallyTimedOut = wasActive && lastActivityAt && Date.now() - lastActivityAt > TASK_TIMEOUT_MS;
+  const completedTaskIds = new Set((Array.isArray(row.completedTaskIds) ? row.completedTaskIds : []).map(String));
+  const resumableTasks = knownRemoteTasks.filter(task => !completedTaskIds.has(String(task.taskId)));
   row.queuedJobs = 0;
   row.runningJobs = 0;
   row.runToken = "";
   row.cancelRequested = false;
   row.lastActivityAt = 0;
+  delete row.resumeRemoteTasks;
+  delete row.recoveryMissingJobs;
   if (isActuallyTimedOut) {
-    row.error = hadResults ? "任务超时，剩余任务已判定失败" : "任务超时，已判定为生成失败";
+    row.error = hadResults ? "\u4efb\u52a1\u8d85\u65f6\uff0c\u5269\u4f59\u4efb\u52a1\u5df2\u5224\u5b9a\u5931\u8d25" : "\u4efb\u52a1\u8d85\u65f6\uff0c\u5df2\u5224\u5b9a\u4e3a\u751f\u6210\u5931\u8d25";
     row.status = hadResults ? "partial" : "failed";
     row.totalJobs = row.totalJobs || row.count || 1;
     row.finishedJobs = Math.max(row.finishedJobs || 0, row.totalJobs);
     row.canceledJobs = 0;
     return;
   }
+  if (resumableTasks.length > 0) {
+    const completedCount = completedTaskIds.size;
+    const requestedTotal = Math.max(Number(row.totalJobs || 0), Number(row.count || 0), completedCount + resumableTasks.length);
+    const missingJobs = Math.max(0, requestedTotal - completedCount - resumableTasks.length);
+    row.resumeRemoteTasks = resumableTasks;
+    row.recoveryMissingJobs = missingJobs;
+    row.totalJobs = requestedTotal;
+    row.finishedJobs = completedCount;
+    row.canceledJobs = missingJobs;
+    row.queuedJobs = resumableTasks.length;
+    row.status = hadResults ? "partial" : "queued";
+    row.error = missingJobs > 0
+      ? `\u9875\u9762\u5237\u65b0\u540e\u7ee7\u7eed\u8f6e\u8be2\u5df2\u53d6\u5f97\u4efb\u52a1 ID \u7684\u4efb\u52a1\uff1b\u53e6\u6709 ${missingJobs} \u4e2a\u672c\u5730\u4efb\u52a1\u672a\u53d6\u5f97\u4efb\u52a1 ID\uff0c\u672a\u81ea\u52a8\u91cd\u65b0\u63d0\u4ea4`
+      : "";
+    return;
+  }
   if (hadResults) {
     row.status = "partial";
-    row.error = "页面刷新中断本地队列，已保留已返回结果，可重新提交剩余内容";
+    row.error = "\u9875\u9762\u5237\u65b0\u4e2d\u65ad\u672c\u5730\u961f\u5217\uff0c\u5df2\u4fdd\u7559\u5df2\u8fd4\u56de\u7ed3\u679c\uff0c\u4f46\u6ca1\u6709\u53ef\u6062\u590d\u7684\u4efb\u52a1 ID";
     row.totalJobs = row.totalJobs || row.count || row.results.length;
     row.finishedJobs = Math.max(row.finishedJobs || row.results.length, row.results.length);
     row.canceledJobs = Math.max(0, row.totalJobs - row.finishedJobs);
   } else {
     row.status = "pending";
-    row.error = "页面刷新中断本地队列，已释放为待处理，可重新提交";
+    row.error = "\u9875\u9762\u5237\u65b0\u4e2d\u65ad\u672c\u5730\u961f\u5217\uff0c\u672a\u53d6\u5f97\u4efb\u52a1 ID\uff0c\u5df2\u91ca\u653e\u4e3a\u5f85\u5904\u7406";
     row.totalJobs = 0;
     row.finishedJobs = 0;
     row.canceledJobs = 0;
@@ -1851,6 +1877,8 @@ function createRow(seed = {}) {
     quality: seed.quality ?? (config.qualities[1] || config.qualities[0] || ""),
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -1926,6 +1954,8 @@ function createAvatarRow(seed = {}) {
     mode: seed.mode || (model === "kling" ? "pro" : ""),
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -1983,6 +2013,8 @@ function createMotionRow(seed = {}) {
     quality: seed.quality ?? (config.qualities[0] || ""),
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -2069,6 +2101,8 @@ function createImageVideoRow(seed = {}) {
     duration: String(seed.duration || config.durations[0] || "5"),
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -2148,6 +2182,8 @@ function createViduRefRow(seed = {}) {
     voiceId: seed.voiceId || "",
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -2180,6 +2216,8 @@ function createMultiRow(seed = {}) {
     generateAudio: seed.generateAudio !== false,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
+    remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
+    completedTaskIds: Array.isArray(seed.completedTaskIds) ? seed.completedTaskIds : [],
     results: seed.results || [],
     error: seed.error || "",
     queuedJobs: 0,
@@ -5098,7 +5136,7 @@ function bindAvatarRow(tr, row) {
   tr.querySelector(".submit-avatar-row").addEventListener("click", () => enqueueAvatarRows([row]));
   tr.querySelector(".cancel-avatar-row").addEventListener("click", () => cancelAvatarQueuedJobs(row.id));
   tr.querySelector(".duplicate-avatar-row").addEventListener("click", () => {
-    state.avatarRows.splice(state.avatarRows.indexOf(row) + 1, 0, createAvatarRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
+    state.avatarRows.splice(state.avatarRows.indexOf(row) + 1, 0, createAvatarRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "" }));
     persistAvatarRows();
     render();
   });
@@ -5191,7 +5229,7 @@ function bindMotionRow(tr, row) {
   tr.querySelector(".submit-motion-row").addEventListener("click", () => enqueueMotionRows([row]));
   tr.querySelector(".cancel-motion-row").addEventListener("click", () => cancelMotionQueuedJobs(row.id));
   tr.querySelector(".duplicate-motion-row").addEventListener("click", () => {
-    state.motionRows.splice(state.motionRows.indexOf(row) + 1, 0, createMotionRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
+    state.motionRows.splice(state.motionRows.indexOf(row) + 1, 0, createMotionRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "" }));
     persistMotionRows();
     render();
   });
@@ -5287,7 +5325,7 @@ function bindImageVideoRow(tr, row) {
   tr.querySelector(".submit-image-video-row").addEventListener("click", () => enqueueImageVideoRows([row]));
   tr.querySelector(".cancel-image-video-row").addEventListener("click", () => cancelImageVideoQueuedJobs(row.id));
   tr.querySelector(".duplicate-image-video-row").addEventListener("click", () => {
-    state.imageVideoRows.splice(state.imageVideoRows.indexOf(row) + 1, 0, createImageVideoRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
+    state.imageVideoRows.splice(state.imageVideoRows.indexOf(row) + 1, 0, createImageVideoRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "" }));
     persistImageVideoRows();
     render();
   });
@@ -5388,7 +5426,7 @@ function bindMultiRow(tr, row) {
   tr.querySelector(".submit-multi-row").addEventListener("click", () => enqueueMultiRows([row]));
   tr.querySelector(".cancel-multi-row").addEventListener("click", () => cancelMultiQueuedJobs(row.id));
   tr.querySelector(".duplicate-multi-row").addEventListener("click", () => {
-    state.multiRows.splice(state.multiRows.indexOf(row) + 1, 0, createMultiRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
+    state.multiRows.splice(state.multiRows.indexOf(row) + 1, 0, createMultiRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "" }));
     persistMultiRows();
     render();
   });
@@ -5482,7 +5520,7 @@ function bindViduRefRow(tr, row) {
   tr.querySelector(".submit-vidu-ref-row").addEventListener("click", () => enqueueViduRefRows([row]));
   tr.querySelector(".cancel-vidu-ref-row").addEventListener("click", () => cancelViduRefQueuedJobs(row.id));
   tr.querySelector(".duplicate-vidu-ref-row").addEventListener("click", () => {
-    state.viduRefRows.splice(state.viduRefRows.indexOf(row) + 1, 0, createViduRefRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "", returnedSeeds: [] }));
+    state.viduRefRows.splice(state.viduRefRows.indexOf(row) + 1, 0, createViduRefRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "", returnedSeeds: [] }));
     persistViduRefRows();
     render();
   });
@@ -5563,7 +5601,7 @@ function bindRow(tr, row) {
   tr.querySelector(".submit-row").addEventListener("click", () => enqueueRows([row]));
   tr.querySelector(".cancel-row").addEventListener("click", () => cancelQueuedJobs(row.id));
   tr.querySelector(".duplicate-row").addEventListener("click", () => {
-    state.rows.splice(state.rows.indexOf(row) + 1, 0, createRow({ ...row, id: undefined, status: "pending", taskIds: [], results: [], error: "" }));
+    state.rows.splice(state.rows.indexOf(row) + 1, 0, createRow({ ...row, id: undefined, status: "pending", taskIds: [], remoteTasks: [], completedTaskIds: [], results: [], error: "" }));
     persistRows();
     render();
   });
@@ -8156,6 +8194,7 @@ function enqueueRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
     row.runningJobs = 0;
@@ -8266,7 +8305,8 @@ function rememberRemoteTask(row, task, queryEndpoint = "") {
   const record = {
     taskId: task.taskId,
     taskPath: task.taskPath || "",
-    queryEndpoint: queryEndpoint || ""
+    queryEndpoint: queryEndpoint || "",
+    apiKey: task.apiKey || ""
   };
   const existing = Array.isArray(row.remoteTasks) ? row.remoteTasks : [];
   row.remoteTasks = [
@@ -8283,7 +8323,8 @@ function remoteTasksForRow(row) {
     map.set(String(taskId), {
       taskId: String(taskId),
       taskPath: item.taskPath || item.task_path || "",
-      queryEndpoint: item.queryEndpoint || item.query_endpoint || ""
+      queryEndpoint: item.queryEndpoint || item.query_endpoint || "",
+      apiKey: item.apiKey || item.api_key || ""
     });
   });
   (Array.isArray(row?.taskIds) ? row.taskIds : []).forEach(taskId => {
@@ -8293,6 +8334,142 @@ function remoteTasksForRow(row) {
   return Array.from(map.values());
 }
 
+function markRemoteTaskComplete(row, taskId) {
+  if (!row || !taskId) return;
+  const completed = new Set((Array.isArray(row.completedTaskIds) ? row.completedTaskIds : []).map(String));
+  completed.add(String(taskId));
+  row.completedTaskIds = Array.from(completed);
+}
+
+function recoveredTaskPipelines() {
+  return [
+    {
+      page: "image",
+      rows: state.rows,
+      find: findRow,
+      model: getModel,
+      append: appendRowResult,
+      persist: persistRows
+    },
+    {
+      page: "imageVideo",
+      rows: state.imageVideoRows,
+      find: findImageVideoRow,
+      model: getImageVideoModel,
+      append: appendImageVideoRowResult,
+      persist: persistImageVideoRows
+    },
+    {
+      page: "motion",
+      rows: state.motionRows,
+      find: findMotionRow,
+      model: getMotionModel,
+      append: appendMotionRowResult,
+      persist: persistMotionRows
+    },
+    {
+      page: "avatar",
+      rows: state.avatarRows,
+      find: findAvatarRow,
+      model: getAvatarModel,
+      append: appendAvatarRowResult,
+      persist: persistAvatarRows
+    },
+    {
+      page: "multiVideo",
+      rows: state.multiRows,
+      find: findMultiRow,
+      model: getMultiModel,
+      append: appendMultiRowResult,
+      persist: persistMultiRows
+    },
+    {
+      page: "viduRef",
+      rows: state.viduRefRows,
+      find: findViduRefRow,
+      model: () => VIDU_REF_VIDEO_MODEL,
+      append: appendViduRefRowResult,
+      persist: persistViduRefRows
+    }
+  ];
+}
+
+function resumeInterruptedRemoteTasks() {
+  state.resumeQueue = [];
+  recoveredTaskPipelines().forEach(pipeline => {
+    let changed = false;
+    pipeline.rows.forEach(row => {
+      const tasks = Array.isArray(row.resumeRemoteTasks) ? row.resumeRemoteTasks : [];
+      if (!tasks.length) return;
+      row.runToken = uid("resume");
+      row.cancelRequested = false;
+      row.queuedJobs = tasks.length;
+      row.runningJobs = 0;
+      tasks.forEach(task => {
+        state.resumeQueue.push({
+          id: uid("resumejob"),
+          page: pipeline.page,
+          rowId: row.id,
+          runToken: row.runToken,
+          task: { ...task }
+        });
+      });
+      delete row.resumeRemoteTasks;
+      changed = true;
+    });
+    if (changed) pipeline.persist();
+  });
+  runRecoveredTaskQueue();
+}
+
+function runRecoveredTaskQueue() {
+  while (state.resumeRunning < getMaxConcurrency() && state.resumeQueue.length > 0) {
+    const job = state.resumeQueue.shift();
+    processRecoveredRemoteTask(job);
+  }
+}
+
+async function processRecoveredRemoteTask(job) {
+  const pipeline = recoveredTaskPipelines().find(item => item.page === job.page);
+  const row = pipeline?.find(job.rowId);
+  if (!pipeline || !row || row.runToken !== job.runToken || row.cancelRequested) {
+    runRecoveredTaskQueue();
+    return;
+  }
+  state.resumeRunning += 1;
+  const isCurrentJob = () => row.runToken === job.runToken && !row.cancelRequested;
+  row.queuedJobs = Math.max(0, row.queuedJobs - 1);
+  row.runningJobs += 1;
+  row.lastActivityAt = Date.now();
+  updateRowStatus(row);
+  pipeline.persist();
+  render();
+  try {
+    const model = pipeline.model(row);
+    const task = { ...job.task };
+    const queryEndpoint = task.queryEndpoint || model?.queryEndpoint || "";
+    if (!queryEndpoint) throw new Error("\u5df2\u53d6\u5f97\u4efb\u52a1 ID\uff0c\u4f46\u7f3a\u5c11\u67e5\u8be2\u63a5\u53e3\uff0c\u65e0\u6cd5\u6062\u590d\u8f6e\u8be2");
+    if (/runninghub\/query/i.test(queryEndpoint) && !task.apiKey) task.apiKey = runningHubMotionApiKey();
+    const result = await pollTask(queryEndpoint, task, row, job);
+    if (!isCurrentJob()) return;
+    pipeline.append(row, result, { resumed: true, task_id: task.taskId }, task.taskId);
+    if (!row.recoveryMissingJobs) row.error = "";
+  } catch (error) {
+    if (!isCurrentJob()) return;
+    row.error = error.message;
+  } finally {
+    if (isCurrentJob()) {
+      row.runningJobs = Math.max(0, row.runningJobs - 1);
+      row.finishedJobs += 1;
+      row.lastActivityAt = Date.now();
+      updateRowStatus(row);
+      pipeline.persist();
+      render();
+    }
+    state.resumeRunning = Math.max(0, state.resumeRunning - 1);
+    runRecoveredTaskQueue();
+  }
+}
 function cancelEndpointsForModel(model, explicitQueryEndpoint = "") {
   const endpoints = [];
   const add = value => {
@@ -8398,9 +8575,21 @@ async function postCancelJson(endpoint, payload) {
   }
 }
 
+function appendUniqueResults(row, urls) {
+  if (!Array.isArray(row.results)) row.results = [];
+  const existing = new Set(row.results.filter(Boolean).map(String));
+  (Array.isArray(urls) ? urls : []).forEach(url => {
+    const key = String(url || "");
+    if (!key || existing.has(key)) return;
+    row.results.push(url);
+    existing.add(key);
+  });
+}
+
 function appendRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -8418,7 +8607,12 @@ function appendRowResult(row, data, payload, taskId) {
 }
 
 function addGenerationHistory(record) {
-  state.generationHistory = [record, ...state.generationHistory];
+  const taskId = String(record?.taskId || "");
+  const page = String(record?.page || "");
+  const history = taskId
+    ? state.generationHistory.filter(item => String(item?.taskId || "") !== taskId || String(item?.page || "") !== page)
+    : state.generationHistory;
+  state.generationHistory = [record, ...history];
   persistGenerationHistory();
 }
 
@@ -8437,6 +8631,7 @@ function enqueueImageVideoRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
     row.runningJobs = 0;
@@ -8520,7 +8715,8 @@ async function processImageVideoJob(job) {
 
 function appendImageVideoRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -8606,6 +8802,7 @@ function enqueueMotionRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
     row.runningJobs = 0;
@@ -8654,6 +8851,7 @@ async function processMotionJob(job) {
     if (model.async) {
       const task = normalizeTask(response.data);
       if (!task.taskId) throw new Error("接口返回缺少 task_id");
+      if (payload?.apiKey) task.apiKey = payload.apiKey;
       row.taskIds.push(task.taskId);
       rememberRemoteTask(row, task, queryEndpoint);
       row.lastActivityAt = Date.now();
@@ -8707,7 +8905,8 @@ async function postMotionCreate(model, payload) {
 
 function appendMotionRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -8789,6 +8988,7 @@ function enqueueAvatarRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
     row.runningJobs = 0;
@@ -8900,7 +9100,8 @@ async function postAvatarCreate(modelKey, model, payload) {
 
 function appendAvatarRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -8987,6 +9188,7 @@ function enqueueMultiRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
     row.runningJobs = 0;
@@ -9070,7 +9272,8 @@ async function processMultiJob(job) {
 
 function appendMultiRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -9153,6 +9356,7 @@ function enqueueViduRefRows(rowsToSubmit) {
     row.results = [];
     row.taskIds = [];
     row.remoteTasks = [];
+    row.completedTaskIds = [];
     row.returnedSeeds = [];
     row.totalJobs = row.count;
     row.queuedJobs = row.count;
@@ -9260,7 +9464,8 @@ async function postViduRefCreate(payload) {
 function appendViduRefRowResult(row, data, payload, taskId) {
   appendViduRefSeed(row, extractSeed(data));
   const urls = normalizeResults(data);
-  urls.forEach(url => row.results.push(url));
+  appendUniqueResults(row, urls);
+  markRemoteTaskComplete(row, taskId);
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -9385,6 +9590,7 @@ function clearSubmittedArtifacts(row) {
   row.taskIds = [];
   row.results = [];
   row.remoteTasks = [];
+  row.completedTaskIds = [];
   if (Array.isArray(row.returnedSeeds)) row.returnedSeeds = [];
   row.totalJobs = 0;
   row.queuedJobs = 0;
@@ -9395,6 +9601,8 @@ function clearSubmittedArtifacts(row) {
   row.lastActivityAt = 0;
   row.runToken = "";
   row.cancelRequested = false;
+  delete row.resumeRemoteTasks;
+  delete row.recoveryMissingJobs;
   delete row.remoteCancelRequestedAt;
   delete row.remoteCancelEndpoints;
 }
@@ -12719,6 +12927,7 @@ async function bootstrapApp() {
   persistViduRefRows();
   persistAvatarRows();
   await initializeHistoryStorage();
+  resumeInterruptedRemoteTasks();
   render();
 }
 

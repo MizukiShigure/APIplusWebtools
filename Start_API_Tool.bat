@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 if not defined PORT set "PORT=4198"
-set "URL=http://127.0.0.1:%PORT%/?v=portable-20260716"
+set "URL=http://127.0.0.1:%PORT%/?v=release-20260728"
 set "NODE_EXE="
 
 where node >nul 2>nul

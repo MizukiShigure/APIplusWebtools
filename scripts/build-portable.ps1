@@ -37,8 +37,12 @@ if ([string]::IsNullOrWhiteSpace($outputDirectory)) {
 
 $publicFiles = @(
   ".gitignore",
-  "VERSION",
+  "AGENTS.md",
   "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "README.md",
+  "README_START.txt",
+  "VERSION",
   "model-contracts.js",
   "app.js",
   "styles.css",
@@ -50,13 +54,28 @@ $publicFiles = @(
   "launcher-pm2-owner.ps1",
   "Start_API_Tool.bat",
   "Stop_API_Tool.bat",
+  "Make_Portable_Package.bat",
   "Update_From_Git.bat",
   "Restore_Version.bat",
   "start_multimodal_video_dev.bat",
-  "README.md",
-  "README_START.txt",
   "package.json",
-  "scripts/build-portable.ps1"
+  "scripts/build-portable.ps1",
+  "docs/ARCHITECTURE.md",
+  "docs/DEVELOPMENT.md",
+  "docs/API_INTEGRATION.md",
+  "docs/DATA_AND_PRIVACY.md",
+  "docs/RELEASE_CHECKLIST.md",
+  "launcher-contract.test.cjs",
+  "history-recovery.test.cjs",
+  "portable-package.test.cjs",
+  "prompt-detail-panel.test.cjs",
+  "compact-model-params-layout.test.cjs",
+  "ui-layout-contract.test.cjs",
+  "runtime-behavior.test.cjs",
+  "dirty-row-state.test.cjs",
+  "dirty-row-clear.test.cjs",
+  "model-contracts.test.cjs",
+  "queue-refresh-resume.test.cjs"
 )
 
 $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("internal-api-batch-portable-" + [guid]::NewGuid().ToString("N"))
@@ -75,15 +94,6 @@ try {
     New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
   }
-
-  $stagedApp = Join-Path $stage "app.js"
-  $appText = [System.IO.File]::ReadAllText($stagedApp, $utf8)
-  $apiDefaultPattern = '(?m)^const API_DEFAULT = "[^"]*";\r?$'
-  if ([regex]::Matches($appText, $apiDefaultPattern).Count -ne 1) {
-    throw "Unable to sanitize the portable API Base default."
-  }
-  $sanitizedAppText = [regex]::Replace($appText, $apiDefaultPattern, 'const API_DEFAULT = "";')
-  [System.IO.File]::WriteAllText($stagedApp, $sanitizedAppText, $utf8)
 
   foreach ($directory in @("data", "runtime")) {
     $keepDirectory = Join-Path $stage $directory
