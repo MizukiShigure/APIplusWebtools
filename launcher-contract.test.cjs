@@ -121,6 +121,14 @@ assert(pm2Owner.includes("pm_cwd") && pm2Owner.includes("pm_exec_path"), "PM2 ow
 assert(pm2Owner.includes("Normalize-PathValue") && pm2Owner.includes("-ine"), "PM2 owner helper must normalize paths before case-insensitive comparison");
 assert(pm2Owner.includes("PM2_OWNER=current") && pm2Owner.includes("PM2_OWNER=none") && pm2Owner.includes("PM2_OWNER=conflict"), "PM2 owner helper must classify ownership");
 assert(pm2Owner.includes("PM2_PIDS="), "PM2 owner helper must return exact PIDs for verified project apps");
+const missingOwnerArgs = spawnSync("powershell", [
+  "-NoProfile",
+  "-NonInteractive",
+  "-ExecutionPolicy", "Bypass",
+  "-File", "launcher-pm2-owner.ps1"
+], { encoding: "utf8" });
+assert(missingOwnerArgs.status === 0, "PM2 owner helper must handle missing internal arguments without an interactive parameter prompt");
+assert(missingOwnerArgs.stdout.includes("PM2_ERROR=") && missingOwnerArgs.stdout.includes("PM2_OWNER=conflict"), "PM2 owner helper must report a machine-readable missing-argument error");
 const pm2FixturePath = path.join(require("os").tmpdir(), `launcher-pm2-owner-${process.pid}.json`);
 try {
   fs.writeFileSync(pm2FixturePath, JSON.stringify([{

@@ -3,13 +3,17 @@ param(
   [string]$Pm2Js,
   [string]$NodeExe,
   [string]$JsonFixturePath,
-  [Parameter(Mandatory = $true)]
   [string]$ProjectRoot,
-  [Parameter(Mandatory = $true)]
   [string]$ProjectServerPath
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot) -or [string]::IsNullOrWhiteSpace($ProjectServerPath)) {
+  Write-Output "PM2_ERROR=Missing internal ProjectRoot or ProjectServerPath argument"
+  Write-Output "PM2_OWNER=conflict"
+  exit 0
+}
 
 function Normalize-PathValue([string]$PathValue) {
   if ([string]::IsNullOrWhiteSpace($PathValue)) { return "" }
