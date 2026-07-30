@@ -5,11 +5,16 @@ const path = require("node:path");
 
 const {
   KLING_3_OMNI,
+  MINIMAX_H3,
   buildKling3OmniPayload,
+  buildMiniMaxH3FirstLastPayload,
+  buildMiniMaxH3MultiPayload,
   formatProviderError,
   nearestQualityOption,
   seedance2QualityOptions,
-  validateKling3OmniRow
+  validateKling3OmniRow,
+  validateMiniMaxH3FirstLastRow,
+  validateMiniMaxH3MultiRow
 } = contracts;
 
 function row(overrides = {}) {
@@ -104,6 +109,128 @@ assert.match(validateKling3OmniRow(row({ refs: [{ ...video, fps: 23 }] })), /24.
 
 assert.equal(validateKling3OmniRow(row({ refs: [{ type: "video", url: "https://cdn.example/upload", name: "upload" }] })), "");
 assert.equal(validateKling3OmniRow(row({ refs: [{ type: "image", url: "https://cdn.example/upload", name: "upload" }] })), "");
+
+assert.deepEqual(MINIMAX_H3, {
+  endpoint: "/minimax_h3",
+  queryEndpoint: "/minimax_h3_query",
+  version: "MiniMax-H3",
+  sizes: ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+  qualities: ["768P", "2K"],
+  durations: ["5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+  defaultSize: "9:16",
+  defaultQuality: "768P",
+  defaultDuration: "5",
+  maxRefs: 12,
+  maxReferenceVideoDuration: 15
+});
+
+const h3FirstFrame = { type: "image", url: "https://cdn.example/h3-first.png" };
+const h3LastFrame = { type: "image", url: "https://cdn.example/h3-last.png" };
+const h3FirstLastRow = {
+  prompt: "  Camera moves closer.  ",
+  version: "MiniMax-H3",
+  size: "9:16",
+  quality: "768P",
+  duration: "5",
+  generateAudio: true,
+  firstFrame: h3FirstFrame,
+  lastFrame: h3LastFrame
+};
+
+assert.equal(validateMiniMaxH3FirstLastRow(h3FirstLastRow), "");
+assert.deepEqual(buildMiniMaxH3FirstLastPayload(h3FirstLastRow), {
+  prompt: "Camera moves closer.",
+  model_name: "MiniMax-H3",
+  generate_audio: true,
+  ratio: "9:16",
+  duration: 5,
+  resolution: "768P",
+  first_frame_image: h3FirstFrame.url,
+  last_frame_image: h3LastFrame.url
+});
+
+const h3MinimalFirstLastPayload = buildMiniMaxH3FirstLastPayload({
+  ...h3FirstLastRow,
+  prompt: "",
+  generateAudio: false,
+  lastFrame: null
+});
+assert.equal(h3MinimalFirstLastPayload.generate_audio, false);
+assert.equal("prompt" in h3MinimalFirstLastPayload, false);
+assert.equal("last_frame_image" in h3MinimalFirstLastPayload, false);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, firstFrame: null }), /首帧/);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, version: "MiniMax-Hailuo-02" }), /版本/);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, size: "2:1" }), /尺寸/);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, quality: "1080P" }), /清晰度/);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, duration: "4" }), /时长/);
+assert.match(validateMiniMaxH3FirstLastRow({ ...h3FirstLastRow, duration: "5.5" }), /时长/);
+
+const h3MultiImage1 = { type: "image", url: "https://cdn.example/h3-image-1.png" };
+const h3MultiAudio1 = { type: "audio", url: "https://cdn.example/h3-audio-1.mp3", duration: 6 };
+const h3MultiVideo1 = { type: "video", url: "https://cdn.example/h3-video-1.mp4", duration: 8 };
+const h3MultiImage2 = { type: "image", url: "https://cdn.example/h3-image-2.png" };
+const h3MultiRow = {
+  prompt: "让@1看向@3，使用@2的声音，随后<<image_2>>挥手，保留@9。",
+  version: "MiniMax-H3",
+  size: "16:9",
+  quality: "2K",
+  duration: "15",
+  generateAudio: false,
+  refs: [h3MultiImage1, h3MultiAudio1, h3MultiVideo1, h3MultiImage2]
+};
+
+assert.equal(validateMiniMaxH3MultiRow(h3MultiRow), "");
+assert.deepEqual(buildMiniMaxH3MultiPayload(h3MultiRow), {
+  prompt: "让图片1看向视频1，使用音频1的声音，随后图片2挥手，保留@9。",
+  model_name: "MiniMax-H3",
+  generate_audio: false,
+  ratio: "16:9",
+  duration: 15,
+  resolution: "2K",
+  reference_images: [h3MultiImage1.url, h3MultiImage2.url],
+  reference_videos: [h3MultiVideo1.url],
+  reference_audios: [h3MultiAudio1.url]
+});
+
+assert.equal(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: [], prompt: "Prompt only." }), "");
+assert.equal(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: [h3MultiImage1], prompt: "" }), "");
+assert.equal(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: [h3MultiVideo1], prompt: "" }), "");
+assert.match(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: [], prompt: "" }), /Prompt.*图片.*视频/);
+assert.match(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: [h3MultiAudio1], prompt: "Use this audio." }), /音频.*图片.*视频/);
+
+const h3TwelveImages = Array.from({ length: 12 }, (_, index) => ({
+  type: "image",
+  url: `https://cdn.example/h3-${index + 1}.png`
+}));
+assert.equal(validateMiniMaxH3MultiRow({ ...h3MultiRow, refs: h3TwelveImages }), "");
+assert.match(
+  validateMiniMaxH3MultiRow({
+    ...h3MultiRow,
+    refs: [...h3TwelveImages, { type: "image", url: "https://cdn.example/h3-13.png" }]
+  }),
+  /最多.*12/
+);
+assert.equal(validateMiniMaxH3MultiRow({
+  ...h3MultiRow,
+  refs: [
+    { type: "video", url: "https://cdn.example/h3-a.mp4", duration: 8 },
+    { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7 }
+  ]
+}), "");
+assert.match(validateMiniMaxH3MultiRow({
+  ...h3MultiRow,
+  refs: [
+    { type: "video", url: "https://cdn.example/h3-a.mp4", duration: 8 },
+    { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7.1 }
+  ]
+}), /15/);
+assert.equal(validateMiniMaxH3MultiRow({
+  ...h3MultiRow,
+  refs: [{ type: "video", url: "https://cdn.example/h3-unknown.mp4" }]
+}), "");
+assert.match(validateMiniMaxH3MultiRow({ ...h3MultiRow, size: "2:1" }), /尺寸/);
+assert.match(validateMiniMaxH3MultiRow({ ...h3MultiRow, quality: "1080P" }), /清晰度/);
+assert.match(validateMiniMaxH3MultiRow({ ...h3MultiRow, duration: "16" }), /时长/);
 
 const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const pageSource = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");

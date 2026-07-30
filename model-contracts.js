@@ -12,6 +12,20 @@
     durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
   };
 
+  const MINIMAX_H3 = {
+    endpoint: "/minimax_h3",
+    queryEndpoint: "/minimax_h3_query",
+    version: "MiniMax-H3",
+    sizes: ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+    qualities: ["768P", "2K"],
+    durations: ["5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+    defaultSize: "9:16",
+    defaultQuality: "768P",
+    defaultDuration: "5",
+    maxRefs: 12,
+    maxReferenceVideoDuration: 15
+  };
+
   function seedance2QualityOptions(version) {
     return version === "doubao-seedance-2-0-fast-260128"
       ? ["480p", "720p"]
@@ -138,6 +152,113 @@
     };
   }
 
+  function validateMiniMaxH3FirstLastRow(row = {}) {
+    if (!String(row.firstFrame?.url || "").trim()) return "MiniMax H3 首尾帧模式必须提供首帧图";
+    return validateMiniMaxH3Base(row);
+  }
+
+  function validateMiniMaxH3MultiRow(row = {}) {
+    const baseError = validateMiniMaxH3Base(row);
+    if (baseError) return baseError;
+
+    const refs = miniMaxH3Refs(row);
+    if (refs.length > MINIMAX_H3.maxRefs) return `MiniMax H3 参考素材最多 ${MINIMAX_H3.maxRefs} 个`;
+    if (refs.some(asset => !String(asset.url || "").trim())) return "MiniMax H3 参考素材缺少可访问 URL";
+
+    const prompt = String(row.prompt || "").trim();
+    const images = refs.filter(asset => asset.type === "image");
+    const videos = refs.filter(asset => asset.type === "video");
+    const audios = refs.filter(asset => asset.type === "audio");
+    if (!prompt && !images.length && !videos.length) return "MiniMax H3 至少需要 Prompt、图片或视频中的一种";
+    if (audios.length && !images.length && !videos.length) return "MiniMax H3 音频参考必须搭配图片或视频";
+
+    const knownVideoDuration = videos.reduce((total, asset) => {
+      const duration = knownNumber(asset.duration);
+      return total + (duration === null ? 0 : duration);
+    }, 0);
+    if (knownVideoDuration > MINIMAX_H3.maxReferenceVideoDuration) {
+      return `MiniMax H3 参考视频总时长不能超过 ${MINIMAX_H3.maxReferenceVideoDuration} 秒`;
+    }
+    return "";
+  }
+
+  function validateMiniMaxH3Base(row) {
+    if (row.version !== MINIMAX_H3.version) return `MiniMax H3 只支持版本 ${MINIMAX_H3.version}`;
+    if (!MINIMAX_H3.sizes.includes(row.size)) return `MiniMax H3 不支持尺寸 ${row.size || "空"}`;
+    if (!MINIMAX_H3.qualities.includes(row.quality)) return `MiniMax H3 不支持清晰度 ${row.quality || "空"}`;
+    const duration = Number(row.duration);
+    if (!Number.isInteger(duration) || !MINIMAX_H3.durations.includes(String(duration))) {
+      return "MiniMax H3 时长必须是 5 到 15 秒的整数";
+    }
+    return "";
+  }
+
+  function buildMiniMaxH3FirstLastPayload(row = {}) {
+    const payload = buildMiniMaxH3BasePayload(row);
+    payload.first_frame_image = String(row.firstFrame?.url || "").trim();
+    const lastFrame = String(row.lastFrame?.url || "").trim();
+    if (lastFrame) payload.last_frame_image = lastFrame;
+    return payload;
+  }
+
+  function buildMiniMaxH3MultiPayload(row = {}) {
+    const refs = miniMaxH3Refs(row).filter(asset => String(asset.url || "").trim());
+    const labels = buildMiniMaxH3ReferenceLabels(refs);
+    const payload = buildMiniMaxH3BasePayload({
+      ...row,
+      prompt: normalizeMiniMaxH3Prompt(row.prompt, labels)
+    });
+    const images = refs.filter(asset => asset.type === "image").map(asset => asset.url);
+    const videos = refs.filter(asset => asset.type === "video").map(asset => asset.url);
+    const audios = refs.filter(asset => asset.type === "audio").map(asset => asset.url);
+    if (images.length) payload.reference_images = images;
+    if (videos.length) payload.reference_videos = videos;
+    if (audios.length) payload.reference_audios = audios;
+    return payload;
+  }
+
+  function buildMiniMaxH3BasePayload(row) {
+    const payload = {
+      model_name: MINIMAX_H3.version,
+      generate_audio: row.generateAudio !== false,
+      ratio: row.size,
+      duration: Number(row.duration),
+      resolution: row.quality
+    };
+    const prompt = String(row.prompt || "").trim();
+    if (prompt) payload.prompt = prompt;
+    return payload;
+  }
+
+  function miniMaxH3Refs(row) {
+    return (Array.isArray(row.refs) ? row.refs : []).filter(asset => (
+      asset && ["image", "video", "audio"].includes(asset.type)
+    ));
+  }
+
+  function buildMiniMaxH3ReferenceLabels(refs) {
+    const counts = { image: 0, video: 0, audio: 0 };
+    return refs.map((asset, index) => {
+      counts[asset.type] += 1;
+      const prefix = asset.type === "image" ? "图片" : asset.type === "video" ? "视频" : "音频";
+      return {
+        token: `@${index + 1}`,
+        label: `${prefix}${counts[asset.type]}`,
+        type: asset.type
+      };
+    });
+  }
+
+  function normalizeMiniMaxH3Prompt(prompt, labels) {
+    const replacements = new Map(labels.map((item, index) => [String(index + 1), item.label]));
+    return String(prompt || "")
+      .trim()
+      .replace(/@(\d+)(?!\d)/g, (match, position) => replacements.get(position) || match)
+      .replace(/<<image_(\d+)>>/gi, (_, position) => `图片${position}`)
+      .replace(/<<video_(\d+)>>/gi, (_, position) => `视频${position}`)
+      .replace(/<<audio_(\d+)>>/gi, (_, position) => `音频${position}`);
+  }
+
   function validateImage(asset) {
     const width = knownNumber(asset.width);
     const height = knownNumber(asset.height);
@@ -202,10 +323,15 @@
 
   return {
     KLING_3_OMNI,
+    MINIMAX_H3,
     buildKling3OmniPayload,
+    buildMiniMaxH3FirstLastPayload,
+    buildMiniMaxH3MultiPayload,
     formatProviderError,
     nearestQualityOption,
     seedance2QualityOptions,
-    validateKling3OmniRow
+    validateKling3OmniRow,
+    validateMiniMaxH3FirstLastRow,
+    validateMiniMaxH3MultiRow
   };
 });
