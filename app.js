@@ -8,7 +8,13 @@ const VIDEO_COMPRESS_MARGIN = 0.995;
 const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
-const { KLING_3_OMNI, formatProviderError, nearestQualityOption, seedance2QualityOptions } = MODEL_CONTRACTS;
+const {
+  KLING_3_OMNI,
+  MINIMAX_H3,
+  formatProviderError,
+  nearestQualityOption,
+  seedance2QualityOptions
+} = MODEL_CONTRACTS;
 const STORAGE_KEYS = {
   apiBase: "api_console_api_base",
   activePage: "api_console_active_page",
@@ -312,6 +318,30 @@ const IMAGE_VIDEO_MODELS = {
       return payload;
     }
   },
+  minimaxH3: {
+    label: "海螺 H3",
+    endpoint: MINIMAX_H3.endpoint,
+    queryEndpoint: MINIMAX_H3.queryEndpoint,
+    async: true,
+    versions: [{ label: "MiniMax H3", value: MINIMAX_H3.version }],
+    sizes: MINIMAX_H3.sizes,
+    qualities: MINIMAX_H3.qualities,
+    durations: MINIMAX_H3.durations,
+    defaultSize: MINIMAX_H3.defaultSize,
+    defaultQuality: MINIMAX_H3.defaultQuality,
+    defaultDuration: MINIMAX_H3.defaultDuration,
+    supportsTextOnly: false,
+    requiresPrompt: false,
+    supportsFirstFrame: true,
+    supportsLastFrame: true,
+    supportsGenerateAudio: true,
+    validate(row) {
+      return MODEL_CONTRACTS.validateMiniMaxH3FirstLastRow(row);
+    },
+    build(row) {
+      return MODEL_CONTRACTS.buildMiniMaxH3FirstLastPayload(row);
+    }
+  },
   veo: {
     label: "Veo",
     endpoint: "/veo3",
@@ -534,6 +564,28 @@ const MULTI_VIDEO_MODELS = {
     },
     build(row) {
       return buildSeedance2Payload(row);
+    }
+  },
+  minimaxH3: {
+    label: "海螺 H3",
+    endpoint: MINIMAX_H3.endpoint,
+    queryEndpoint: MINIMAX_H3.queryEndpoint,
+    async: true,
+    versions: [{ label: "MiniMax H3", value: MINIMAX_H3.version }],
+    sizes: MINIMAX_H3.sizes,
+    qualities: MINIMAX_H3.qualities,
+    durations: MINIMAX_H3.durations,
+    defaultSize: MINIMAX_H3.defaultSize,
+    defaultQuality: MINIMAX_H3.defaultQuality,
+    defaultDuration: MINIMAX_H3.defaultDuration,
+    maxRefs: MINIMAX_H3.maxRefs,
+    supportsGenerateAudio: true,
+    requiresPrompt: false,
+    validate(row) {
+      return MODEL_CONTRACTS.validateMiniMaxH3MultiRow(row);
+    },
+    build(row) {
+      return MODEL_CONTRACTS.buildMiniMaxH3MultiPayload(row);
     }
   },
   kling3Omni: {
@@ -2070,9 +2122,11 @@ function normalizeImageVideoRows(value) {
       results: Array.isArray(item?.results) ? item.results : item?.result ? [item.result] : []
     });
     row.version = config.versions.some(version => version.value === row.version) ? row.version : config.versions[0].value;
-    row.size = !row.size || getImageVideoSizeOptions(row).includes(row.size) ? row.size : (getImageVideoSizeOptions(row)[0] || "");
-    row.quality = getImageVideoQualityOptions(row).includes(row.quality) ? row.quality : (getImageVideoQualityOptions(row)[0] || "");
-    row.duration = getImageVideoDurationOptions(row).includes(String(row.duration)) ? String(row.duration) : (getImageVideoDurationOptions(row)[0] || "5");
+    const sizeOptions = getImageVideoSizeOptions(row);
+    row.size = sizeOptions.includes(row.size) ? row.size : (config.defaultSize || (!row.size ? "" : (sizeOptions[0] || "")));
+    row.quality = getImageVideoQualityOptions(row).includes(row.quality) ? row.quality : (config.defaultQuality || getImageVideoQualityOptions(row)[0] || "");
+    row.duration = getImageVideoDurationOptions(row).includes(String(row.duration)) ? String(row.duration) : (config.defaultDuration || getImageVideoDurationOptions(row)[0] || "5");
+    row.generateAudio = item?.generateAudio !== false;
     if (!supportsImageVideoLastFrame(row)) row.lastFrame = null;
     if (!supportsImageVideoAutoMultiShot(row)) row.autoMultiShot = false;
     row.status = VALID_ROW_STATUSES.includes(row.status) ? row.status : "pending";
@@ -2096,9 +2150,10 @@ function createImageVideoRow(seed = {}) {
     autoMultiShot: Boolean(seed.autoMultiShot),
     model,
     version: seed.version || config.versions[0].value,
-    size: seed.size ?? (config.sizes[0] || ""),
-    quality: seed.quality ?? (config.qualities[0] || ""),
-    duration: String(seed.duration || config.durations[0] || "5"),
+    size: seed.size ?? (config.defaultSize || config.sizes[0] || ""),
+    quality: seed.quality ?? (config.defaultQuality || config.qualities[0] || ""),
+    duration: String(seed.duration || config.defaultDuration || config.durations[0] || "5"),
+    generateAudio: seed.generateAudio !== false,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
     remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
@@ -2130,9 +2185,9 @@ function normalizeMultiRows(value) {
       results: Array.isArray(item?.results) ? item.results : item?.result ? [item.result] : []
     });
     row.version = config.versions.some(version => version.value === row.version) ? row.version : config.versions[0].value;
-    row.size = config.sizes.includes(row.size) ? row.size : (config.sizes[0] || "");
-    row.quality = getMultiQualityOptions(row).includes(row.quality) ? row.quality : (getMultiQualityOptions(row)[1] || getMultiQualityOptions(row)[0] || "");
-    row.duration = config.durations.includes(String(row.duration)) ? String(row.duration) : (config.durations[0] || "5");
+    row.size = config.sizes.includes(row.size) ? row.size : (config.defaultSize || config.sizes[0] || "");
+    row.quality = getMultiQualityOptions(row).includes(row.quality) ? row.quality : (config.defaultQuality || getMultiQualityOptions(row)[1] || getMultiQualityOptions(row)[0] || "");
+    row.duration = config.durations.includes(String(row.duration)) ? String(row.duration) : (config.defaultDuration || config.durations[0] || "5");
     row.generateAudio = item?.generateAudio !== false;
     row.status = VALID_ROW_STATUSES.includes(row.status) ? row.status : "pending";
     row.count = Math.max(1, Number(row.count || 1));
@@ -2210,9 +2265,9 @@ function createMultiRow(seed = {}) {
     refs: seed.refs || [],
     model,
     version: seed.version || config.versions[0].value,
-    size: seed.size ?? (config.sizes[0] || ""),
-    quality: seed.quality ?? (config.qualities[1] || config.qualities[0] || ""),
-    duration: String(seed.duration || config.durations[0] || "5"),
+    size: seed.size ?? (config.defaultSize || config.sizes[0] || ""),
+    quality: seed.quality ?? (config.defaultQuality || config.qualities[1] || config.qualities[0] || ""),
+    duration: String(seed.duration || config.defaultDuration || config.durations[0] || "5"),
     generateAudio: seed.generateAudio !== false,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
@@ -4089,9 +4144,13 @@ function renderTaskResultCell(row) {
 function renderOptions(values, selected, emptyLabel) {
   const options = [`<option value="" ${selected ? "" : "selected"}>${emptyLabel}</option>`];
   values.forEach(value => {
-    options.push(`<option value="${value}" ${selected === value ? "selected" : ""}>${value}</option>`);
+    options.push(`<option value="${value}" ${selected === value ? "selected" : ""}>${renderOptionLabel(value)}</option>`);
   });
   return options.join("");
+}
+
+function renderOptionLabel(value) {
+  return value === "adaptive" ? "自动" : value;
 }
 
 function renderStackedControlCell(items) {
@@ -4160,7 +4219,8 @@ function renderImageVideoModelCell(row, model, disabled) {
 }
 
 function renderImageVideoParamsCell(row, disabled) {
-  return renderStackedControlCell([
+  const model = getImageVideoModel(row);
+  const controls = [
     {
       label: "尺寸",
       control: `<select class="select-small" data-image-video-field="size" ${disabled}>
@@ -4179,7 +4239,17 @@ function renderImageVideoParamsCell(row, disabled) {
         ${renderOptions(getImageVideoDurationOptions(row), String(row.duration), "空")}
       </select>`
     }
-  ]);
+  ];
+  if (model.supportsGenerateAudio) {
+    controls.push({
+      label: "声音",
+      control: `<label class="inline-check">
+        <input data-image-video-field="generateAudio" type="checkbox" ${row.generateAudio ? "checked" : ""} ${disabled}>
+        <span>生成</span>
+      </label>`
+    });
+  }
+  return renderStackedControlCell(controls);
 }
 
 function renderMultiModelCell(row, model, disabled) {
@@ -5726,6 +5796,7 @@ function handleDrop(event, row, drop) {
 }
 
 function updateImageVideoRowField(row, field, value, redraw = true) {
+  if (field === "generateAudio" && !getImageVideoModel(row).supportsGenerateAudio) return;
   if (isImageVideoRowLocked(row)) return;
   const becameDirty = markRowDirty(row);
   if (field === "model") {
@@ -5735,9 +5806,9 @@ function updateImageVideoRowField(row, field, value, redraw = true) {
     const previousDuration = row.duration;
     row.model = value;
     row.version = next.versions[0].value;
-    row.size = previousSize === "" ? "" : chooseCompatibleOption(previousSize, getImageVideoSizeOptions(row), getImageVideoSizeOptions(row)[0] || "");
-    row.quality = nearestQualityOption(previousQuality, getImageVideoQualityOptions(row), getImageVideoQualityOptions(row)[0] || "");
-    row.duration = getImageVideoDurationOptions(row).includes(String(previousDuration)) ? String(previousDuration) : (getImageVideoDurationOptions(row)[0] || "5");
+    row.size = previousSize === "" && !next.defaultSize ? "" : chooseCompatibleOption(previousSize, getImageVideoSizeOptions(row), next.defaultSize || getImageVideoSizeOptions(row)[0] || "");
+    row.quality = nearestQualityOption(previousQuality, getImageVideoQualityOptions(row), next.defaultQuality || getImageVideoQualityOptions(row)[0] || "");
+    row.duration = getImageVideoDurationOptions(row).includes(String(previousDuration)) ? String(previousDuration) : (next.defaultDuration || getImageVideoDurationOptions(row)[0] || "5");
     if (!supportsImageVideoLastFrame(row)) row.lastFrame = null;
     if (!supportsImageVideoAutoMultiShot(row)) row.autoMultiShot = false;
   } else if (field === "version") {
@@ -5753,6 +5824,8 @@ function updateImageVideoRowField(row, field, value, redraw = true) {
     row.duration = String(value || "5");
   } else if (field === "autoMultiShot") {
     row.autoMultiShot = Boolean(value) && supportsImageVideoAutoMultiShot(row);
+  } else if (field === "generateAudio") {
+    row.generateAudio = Boolean(value);
   } else {
     row[field] = value;
   }
@@ -5857,10 +5930,10 @@ function updateMultiRowField(row, field, value, redraw = true) {
     const previousDuration = row.duration;
     row.model = value;
     row.version = next.versions[0].value;
-    row.size = chooseCompatibleOption(previousSize, next.sizes);
+    row.size = chooseCompatibleOption(previousSize, next.sizes, next.defaultSize || next.sizes[0] || "");
     const qualityOptions = getMultiQualityOptions(row);
-    row.quality = chooseCompatibleOption(previousQuality, qualityOptions, qualityOptions[1] || qualityOptions[0] || "");
-    row.duration = next.durations.includes(String(previousDuration)) ? String(previousDuration) : (next.durations[0] || "5");
+    row.quality = chooseCompatibleOption(previousQuality, qualityOptions, next.defaultQuality || qualityOptions[0] || "");
+    row.duration = next.durations.includes(String(previousDuration)) ? String(previousDuration) : (next.defaultDuration || next.durations[0] || "5");
     row.refs = row.refs.slice(0, next.maxRefs);
   } else if (field === "count") {
     row.count = Math.max(1, Number(value || 1));
@@ -8729,6 +8802,7 @@ function appendImageVideoRowResult(row, data, payload, taskId) {
     quality: row.quality,
     duration: row.duration,
     autoMultiShot: row.autoMultiShot,
+    generateAudio: row.generateAudio !== false,
     images: cloneAssets([row.firstFrame, row.lastFrame].filter(Boolean)),
     refs: cloneAssets([row.firstFrame, row.lastFrame].filter(Boolean)),
     firstFrame: row.firstFrame ? { ...row.firstFrame } : null,
@@ -9285,6 +9359,7 @@ function appendMultiRowResult(row, data, payload, taskId) {
     size: row.size,
     quality: row.quality,
     duration: row.duration,
+    generateAudio: row.generateAudio !== false,
     images: cloneAssets(row.refs || []),
     refs: cloneAssets(row.refs || []),
     params: payload,
@@ -10263,7 +10338,8 @@ function createPendingRowFromGeneration(record, page) {
       model: imageVideoModelKeyFromGeneration(record),
       firstFrame: frames.firstFrame,
       lastFrame: frames.lastFrame,
-      autoMultiShot: Boolean(record.autoMultiShot)
+      autoMultiShot: Boolean(record.autoMultiShot),
+      generateAudio: record.generateAudio !== false
     });
   }
   if (page === "motion") {
@@ -12203,8 +12279,8 @@ function isAvatarRowLocked(row) {
 function validateImageVideoRowBeforeQueue(row) {
   const resolvedSize = resolvedImageVideoSize(row);
   if (!row.size) row.size = resolvedSize;
-  if (!String(row.prompt || "").trim()) return "Prompt 不能为空";
   const model = getImageVideoModel(row);
+  if (model.requiresPrompt !== false && !String(row.prompt || "").trim()) return "Prompt 不能为空";
   if (!model.supportsTextOnly && !row.firstFrame?.url) {
     return `${model.label} 图文生视频必须提供首帧图，不能纯文生视频`;
   }
@@ -12255,7 +12331,7 @@ function validateMultiRowBeforeQueue(row) {
   const model = getMultiModel(row);
   const validationError = model.validate(row);
   if (validationError) return validationError;
-  if (!row.prompt.trim()) return "Prompt 不能为空";
+  if (model.requiresPrompt !== false && !row.prompt.trim()) return "Prompt 不能为空";
   if (row.model === "seedance") {
     const oversized = normalizeAssets(row.refs || []).find(asset => {
       const pixels = Number(asset.width || 0) * Number(asset.height || 0);

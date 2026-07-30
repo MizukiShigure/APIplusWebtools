@@ -238,7 +238,7 @@ const multiVideoModelsSource = appSource.slice(
   appSource.indexOf("const MULTI_VIDEO_MODELS"),
   appSource.indexOf("const VIDU_REF_VIDEO_MODEL")
 );
-const seedanceModelSource = multiVideoModelsSource.split("kling3Omni:")[0];
+const seedanceModelSource = multiVideoModelsSource.split("minimaxH3:")[0];
 const imageVideoModelsSource = appSource.slice(
   appSource.indexOf("const IMAGE_VIDEO_MODELS"),
   appSource.indexOf("const MULTI_VIDEO_MODELS")
@@ -260,5 +260,27 @@ assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path m
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");
 assert.match(appSource, /validate\(row\)\s*\{\s*return MODEL_CONTRACTS\.validateKling3OmniRow\(row\);\s*\}/, "Kling must expose its contract validator");
 assert.match(appSource, /const validationError = model\.validate\(row\);/, "queue validation must invoke the current model validator");
+assert.match(appSource, /const \{[^}]*MINIMAX_H3[^}]*\} = MODEL_CONTRACTS;/, "app must consume the MiniMax H3 contract");
+assert.match(
+  imageVideoModelsSource,
+  /minimaxH3:\s*\{[\s\S]*?label:\s*"海螺 H3"[\s\S]*?endpoint:\s*MINIMAX_H3\.endpoint[\s\S]*?queryEndpoint:\s*MINIMAX_H3\.queryEndpoint[\s\S]*?buildMiniMaxH3FirstLastPayload/,
+  "image-to-video H3 must use the shared first/last-frame contract"
+);
+assert.match(
+  multiVideoModelsSource,
+  /minimaxH3:\s*\{[\s\S]*?label:\s*"海螺 H3"[\s\S]*?endpoint:\s*MINIMAX_H3\.endpoint[\s\S]*?queryEndpoint:\s*MINIMAX_H3\.queryEndpoint[\s\S]*?buildMiniMaxH3MultiPayload/,
+  "multimodal H3 must use the shared omnireference contract"
+);
+assert.match(appSource, /function renderImageVideoParamsCell\(row, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?data-image-video-field="generateAudio"/);
+assert.match(appSource, /function updateImageVideoRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getImageVideoModel\(row\)\.supportsGenerateAudio\) return;/);
+assert.match(appSource, /function validateImageVideoRowBeforeQueue\(row\)[\s\S]*?model\.requiresPrompt !== false/);
+assert.match(appSource, /function validateMultiRowBeforeQueue\(row\)[\s\S]*?model\.requiresPrompt !== false/);
+assert.match(appSource, /size:\s*seed\.size \?\? \(config\.defaultSize \|\| config\.sizes\[0\] \|\| ""\)/);
+assert.match(appSource, /quality:\s*seed\.quality \?\? \(config\.defaultQuality \|\| config\.qualities\[0\] \|\| ""\)/);
+assert.match(appSource, /duration:\s*String\(seed\.duration \|\| config\.defaultDuration \|\| config\.durations\[0\] \|\| "5"\)/);
+assert.match(appSource, /function appendImageVideoRowResult[\s\S]*?generateAudio:\s*row\.generateAudio !== false/);
+assert.match(appSource, /function appendMultiRowResult[\s\S]*?generateAudio:\s*row\.generateAudio !== false/);
+assert.match(appSource, /page === "imageVideo"[\s\S]*?generateAudio:\s*record\.generateAudio !== false/);
+assert.match(appSource, /function renderOptionLabel\(value\)[\s\S]*?value === "adaptive" \? "自动" : value/);
 
 console.log("model-contracts checks passed");
