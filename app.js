@@ -8,6 +8,10 @@ const VIDEO_COMPRESS_MARGIN = 0.995;
 const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
+const PROMPT_DETAIL_UTILS = globalThis.ApiBatchPromptDetailUtils;
+const { insertPromptToken } = PROMPT_DETAIL_UTILS;
+const PROMPT_DETAIL_SAVE_DELAY_MS = 180;
+let promptDetailSession = null;
 const {
   KLING_3_OMNI,
   MINIMAX_H3,
@@ -4472,6 +4476,59 @@ function collectPromptReferences(row, type) {
   ].filter(Boolean);
 }
 
+function promptDetailTaskBinding(type) {
+  return {
+    image: { isLocked: isRowLocked, persist: persistRows },
+    imageVideo: { isLocked: isImageVideoRowLocked, persist: persistImageVideoRows },
+    motion: { isLocked: isMotionRowLocked, persist: persistMotionRows },
+    avatar: { isLocked: isAvatarRowLocked, persist: persistAvatarRows },
+    multi: { isLocked: isMultiRowLocked, persist: persistMultiRows },
+    viduRef: { isLocked: isViduRefRowLocked, persist: persistViduRefRows }
+  }[type] || null;
+}
+
+function findRenderedTaskRow(row) {
+  if (!row?.id || typeof document === "undefined") return null;
+  const id = typeof CSS !== "undefined" && CSS.escape
+    ? CSS.escape(row.id)
+    : String(row.id).replace(/["\\]/g, "\\$&");
+  return document.querySelector([
+    `tr[data-row-id="${id}"]`,
+    `tr[data-image-video-row-id="${id}"]`,
+    `tr[data-motion-row-id="${id}"]`,
+    `tr[data-avatar-row-id="${id}"]`,
+    `tr[data-multi-row-id="${id}"]`,
+    `tr[data-vidu-ref-row-id="${id}"]`
+  ].join(","));
+}
+
+function syncPromptDetailCompactTextarea(context, value) {
+  const rowElement = findRenderedTaskRow(context.row);
+  const compact = rowElement?.querySelector('textarea[data-field="prompt"]');
+  if (compact) compact.value = value;
+}
+
+function createPromptDetailContext(row, type) {
+  const binding = promptDetailTaskBinding(type);
+  if (!binding) throw new Error(`Unsupported prompt detail task type: ${type}`);
+  const context = {
+    row,
+    refs: collectPromptReferences(row, type),
+    type,
+    isLocked: () => binding.isLocked(row),
+    updatePrompt(value) {
+      if (binding.isLocked(row)) return false;
+      const becameDirty = markRowDirty(row);
+      row.prompt = String(value ?? "");
+      syncPromptDetailCompactTextarea(context, row.prompt);
+      if (becameDirty) refreshRowSubmittedStateDisplay(row);
+      return true;
+    },
+    persist: binding.persist
+  };
+  return context;
+}
+
 function renderPromptDetailReference(entry) {
   const item = entry.asset || entry;
   const title = entry.label || item.name || "参考素材";
@@ -4497,15 +4554,88 @@ function shortAssetName(value, max = 42) {
   return text.length > max ? `${text.slice(0, Math.max(8, max - 14))}...${text.slice(-10)}` : text;
 }
 
-function openPromptDetailPanel(row, refs) {
+function schedulePromptDetailPersist() {
+  if (!promptDetailSession) return;
+  promptDetailSession.pendingPersist = true;
+  clearTimeout(promptDetailSession.persistTimer);
+  promptDetailSession.persistTimer = setTimeout(flushPromptDetailPersist, PROMPT_DETAIL_SAVE_DELAY_MS);
+}
+
+function flushPromptDetailPersist() {
+  if (!promptDetailSession) return;
+  clearTimeout(promptDetailSession.persistTimer);
+  promptDetailSession.persistTimer = 0;
+  if (!promptDetailSession.pendingPersist) return;
+  promptDetailSession.pendingPersist = false;
+  promptDetailSession.context.persist();
+}
+
+function refreshPromptDetailLockState() {
+  if (!promptDetailSession) return true;
+  const { overlay, context } = promptDetailSession;
+  const textarea = overlay.querySelector("[data-prompt-detail-prompt]");
+  const locked = context.isLocked();
+  textarea.readOnly = locked;
+  overlay.classList.toggle("prompt-detail-locked", locked);
+  overlay.querySelector("[data-prompt-detail-edit-state]").textContent = locked
+    ? "任务处理中，仅可查看和复制"
+    : "可编辑，修改会自动保存";
+  overlay.querySelectorAll("[data-prompt-detail-token]").forEach(card => {
+    card.draggable = context.type === "multi" && !locked;
+    card.classList.toggle("prompt-detail-ref-insertable", context.type === "multi" && !locked);
+  });
+  return locked;
+}
+
+function closePromptDetailPanel() {
+  if (!promptDetailSession) return;
+  flushPromptDetailPersist();
+  promptDetailSession.overlay.classList.remove("open");
+  promptDetailSession = null;
+}
+
+function applyPromptDetailTextareaValue() {
+  if (!promptDetailSession) return false;
+  const { overlay, context } = promptDetailSession;
+  const textarea = overlay.querySelector("[data-prompt-detail-prompt]");
+  if (refreshPromptDetailLockState()) {
+    textarea.value = String(context.row.prompt || "");
+    return false;
+  }
+  if (!context.updatePrompt(textarea.value)) {
+    textarea.value = String(context.row.prompt || "");
+    refreshPromptDetailLockState();
+    return false;
+  }
+  overlay.querySelector("[data-prompt-detail-copy]").disabled = !textarea.value.trim();
+  promptDetailSession.selectionStart = textarea.selectionStart;
+  promptDetailSession.selectionEnd = textarea.selectionEnd;
+  schedulePromptDetailPersist();
+  return true;
+}
+
+function openPromptDetailPanel(context) {
+  if (promptDetailSession) flushPromptDetailPersist();
   const overlay = ensurePromptDetailOverlay();
-  const prompt = String(row.prompt || "");
-  overlay.querySelector("[data-prompt-detail-prompt]").value = prompt || "无 Prompt";
+  const textarea = overlay.querySelector("[data-prompt-detail-prompt]");
+  const prompt = String(context.row.prompt || "");
+  textarea.value = prompt;
+  textarea.placeholder = "暂无提示词，可在此输入";
   overlay.querySelector("[data-prompt-detail-copy]").disabled = !prompt.trim();
   const refsBox = overlay.querySelector("[data-prompt-detail-refs]");
-  refsBox.innerHTML = refs.length
-    ? refs.map(renderPromptDetailReference).join("")
+  refsBox.innerHTML = context.refs.length
+    ? context.refs.map(entry => renderPromptDetailReference(entry, { insertable: context.type === "multi" })).join("")
     : `<div class="empty-drop">这一行没有参考素材</div>`;
+  promptDetailSession = {
+    context,
+    overlay,
+    pendingPersist: false,
+    persistTimer: 0,
+    selectionStart: prompt.length,
+    selectionEnd: prompt.length,
+    dragToken: ""
+  };
+  refreshPromptDetailLockState();
   overlay.classList.add("open");
 }
 
@@ -4523,10 +4653,13 @@ function ensurePromptDetailOverlay() {
       <div class="prompt-detail-body">
         <section class="prompt-detail-prompt-wrap">
           <div class="prompt-detail-section-head">
-            <strong>Prompt</strong>
+            <div>
+              <strong>Prompt</strong>
+              <small class="prompt-detail-edit-state" data-prompt-detail-edit-state></small>
+            </div>
             <button class="tiny-button" type="button" data-prompt-detail-copy>复制提示词</button>
           </div>
-          <textarea class="prompt-detail-prompt" data-prompt-detail-prompt readonly></textarea>
+          <textarea class="prompt-detail-prompt" data-prompt-detail-prompt></textarea>
         </section>
         <section class="prompt-detail-ref-wrap">
           <div class="prompt-detail-section-head">
@@ -4537,15 +4670,26 @@ function ensurePromptDetailOverlay() {
       </div>
     </section>
   `;
+  const textarea = overlay.querySelector("[data-prompt-detail-prompt]");
   overlay.addEventListener("click", event => {
-    if (event.target === overlay) overlay.classList.remove("open");
+    if (event.target === overlay) closePromptDetailPanel();
   });
-  overlay.querySelector("[data-prompt-detail-close]").addEventListener("click", () => overlay.classList.remove("open"));
+  overlay.querySelector("[data-prompt-detail-close]").addEventListener("click", closePromptDetailPanel);
   overlay.querySelector("[data-prompt-detail-copy]").addEventListener("click", () => {
     copyPromptText(overlay.querySelector("[data-prompt-detail-prompt]").value);
   });
+  textarea.addEventListener("input", applyPromptDetailTextareaValue);
+  textarea.addEventListener("blur", flushPromptDetailPersist);
+  ["select", "click", "keyup"].forEach(type => {
+    textarea.addEventListener(type, () => {
+      if (!promptDetailSession) return;
+      promptDetailSession.selectionStart = textarea.selectionStart;
+      promptDetailSession.selectionEnd = textarea.selectionEnd;
+      refreshPromptDetailLockState();
+    });
+  });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && overlay.classList.contains("open")) overlay.classList.remove("open");
+    if (event.key === "Escape" && overlay.classList.contains("open")) closePromptDetailPanel();
   });
   document.body.appendChild(overlay);
   return overlay;
@@ -5180,7 +5324,7 @@ function bindAvatarRow(tr, row) {
       input.addEventListener("input", event => updateAvatarRowField(row, event.target.dataset.field, event.target.value, false));
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "avatar")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "avatar")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateAvatarRowField, () => isAvatarRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateAvatarRowField, () => isAvatarRowLocked(row)));
@@ -5273,7 +5417,7 @@ function bindMotionRow(tr, row) {
       input.addEventListener("input", event => updateMotionRowField(row, event.target.dataset.field, event.target.value, false));
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "motion")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "motion")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateMotionRowField, () => isMotionRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateMotionRowField, () => isMotionRowLocked(row)));
@@ -5369,7 +5513,7 @@ function bindImageVideoRow(tr, row) {
       input.addEventListener("input", event => updateImageVideoRowField(row, event.target.dataset.field, event.target.value, false));
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "imageVideo")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "imageVideo")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateImageVideoRowField, () => isImageVideoRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateImageVideoRowField, () => isImageVideoRowLocked(row)));
@@ -5476,7 +5620,7 @@ function bindMultiRow(tr, row) {
       });
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "multi")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "multi")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateMultiRowField, () => isMultiRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateMultiRowField, () => isMultiRowLocked(row)));
@@ -5570,7 +5714,7 @@ function bindViduRefRow(tr, row) {
       });
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "viduRef")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "viduRef")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateViduRefRowField, () => isViduRefRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateViduRefRowField, () => isViduRefRowLocked(row)));
@@ -5651,7 +5795,7 @@ function bindRow(tr, row) {
       input.addEventListener("input", event => updateRowField(row, event.target.dataset.field, event.target.value, false));
     }
   });
-  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(row, collectPromptReferences(row, "image")));
+  tr.querySelector(".toggle-prompt")?.addEventListener("click", () => openPromptDetailPanel(createPromptDetailContext(row, "image")));
   tr.querySelector(".copy-prompt")?.addEventListener("click", () => copyPromptText(row.prompt));
   tr.querySelector(".paste-prompt")?.addEventListener("click", () => pastePromptTextToRow(tr, row, updateRowField, () => isRowLocked(row)));
   tr.querySelector(".clear-prompt")?.addEventListener("click", () => clearPromptForRow(row, updateRowField, () => isRowLocked(row)));

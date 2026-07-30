@@ -1909,6 +1909,14 @@ input:disabled {
   gap: 10px;
 }
 
+.prompt-detail-edit-state {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .prompt-detail-prompt {
   min-height: 420px;
   width: 100%;
@@ -1922,6 +1930,12 @@ input:disabled {
   font: inherit;
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+.prompt-detail-prompt[readonly] {
+  background: #f3f6f8;
+  color: var(--muted);
+  cursor: default;
 }
 
 .prompt-detail-refs {
