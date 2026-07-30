@@ -38,6 +38,8 @@ const expectedFiles = [
   "model-contracts.test.cjs",
   "package.json",
   "portable-package.test.cjs",
+  "prompt-detail-utils.js",
+  "prompt-detail-utils.test.cjs",
   "prompt-detail-panel.test.cjs",
   "queue-refresh-resume.test.cjs",
   "runtime/.keep",
