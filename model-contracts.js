@@ -4,11 +4,11 @@
   if (root) root.ApiBatchModelContracts = contracts;
 })(typeof globalThis === "undefined" ? null : globalThis, function createModelContracts() {
   const KLING_3_OMNI = {
-    endpoint: "/kling_3_omni_video",
-    queryEndpoint: "/kling_3_omni_video_query",
-    version: "kling-3-omni",
+    endpoint: "/kling_video_omni",
+    queryEndpoint: "/kling_video_omni_query",
+    version: "kling-v3-omni",
     sizes: ["16:9", "9:16", "1:1"],
-    qualities: ["720p", "1080p", "4k"],
+    qualities: ["720p", "1080p"],
     durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
   };
 
@@ -89,6 +89,9 @@
 
     const videos = refs.filter(asset => asset?.type === "video");
     if (videos.length > 1) return "Kling 3 Omni 最多只能添加一个参考视频";
+    const images = refs.filter(asset => asset?.type === "image");
+    const maxImages = videos.length ? 4 : 7;
+    if (images.length > maxImages) return `Kling 3 Omni ${videos.length ? "带视频时" : ""}最多只能添加 ${maxImages} 张参考图片`;
 
     for (const asset of refs) {
       if (!asset || !["image", "video"].includes(asset.type)) continue;
@@ -101,54 +104,49 @@
 
   function buildKling3OmniPayload(row = {}) {
     const refs = Array.isArray(row.refs) ? row.refs : [];
-    if (refs.filter(asset => asset?.type === "video").length > 1) {
+    const images = refs.filter(asset => asset?.type === "image" && asset.url);
+    const videos = refs.filter(asset => asset?.type === "video" && asset.url);
+    if (videos.length > 1) {
       throw new Error("Kling 3 Omni 最多只能添加一个参考视频");
     }
-    const referenceIds = [];
+    const maxImages = videos.length ? 4 : 7;
+    if (images.length > maxImages) {
+      throw new Error(`Kling 3 Omni ${videos.length ? "带视频时" : ""}最多只能添加 ${maxImages} 张参考图片`);
+    }
+
+    const referenceTokens = [];
     let imageIndex = 0;
     let videoIndex = 0;
-    const contents = [];
 
     refs.forEach(asset => {
       if (asset?.type === "image" && asset.url) {
         imageIndex += 1;
-        referenceIds.push(`image_${imageIndex}`);
+        referenceTokens.push(`<<image_${imageIndex}>>`);
       } else if (asset?.type === "video" && asset.url) {
         videoIndex += 1;
-        referenceIds.push(`video_${videoIndex}`);
+        referenceTokens.push(`<<video_${videoIndex}>>`);
       } else {
-        referenceIds.push("");
+        referenceTokens.push("");
       }
     });
 
-    const prompt = String(row.prompt || "").replace(/@(\d+)(?!\d)/g, (match, position) => referenceIds[Number(position) - 1] || match);
-    contents.push({ type: "prompt", text: prompt });
-
-    let nextImage = 0;
-    let nextVideo = 0;
-    refs.forEach(asset => {
-      if (asset?.type === "image" && asset.url) {
-        nextImage += 1;
-        contents.push({ type: "refer_image", image_url: asset.url, id: `image_${nextImage}` });
-      }
-    });
-    refs.forEach(asset => {
-      if (asset?.type === "video" && asset.url) {
-        nextVideo += 1;
-        contents.push({ type: "feature_video", video_url: asset.url, id: `video_${nextVideo}` });
-      }
-    });
+    const prompt = String(row.prompt || "")
+      .replace(/@(\d+)(?!\d)/g, (match, position) => referenceTokens[Number(position) - 1] || match)
+      .trim();
+    const generateAudio = row.generateAudio !== false;
+    const hasVideo = videos.length > 0;
 
     return {
-      contents,
-      settings: {
-        resolution: row.quality,
-        duration: Number(row.duration),
-        audio: row.generateAudio === false ? "off" : nextVideo ? "original" : "native",
-        multi_shot: false,
-        aspect_ratio: row.size
-      },
-      options: {}
+      prompt,
+      generate_mode: "multi_reference",
+      reference_images: images.map(asset => String(asset.url).trim()),
+      reference_video: hasVideo ? String(videos[0].url).trim() : "",
+      duration: Number(row.duration),
+      keep_video_sound: hasVideo && generateAudio,
+      mode: row.quality === "1080p" ? "pro" : "std",
+      aspect_ratio: row.size,
+      model_name: KLING_3_OMNI.version,
+      sound: generateAudio && !hasVideo ? "on" : "off"
     };
   }
 

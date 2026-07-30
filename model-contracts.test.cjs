@@ -20,7 +20,7 @@ const {
 function row(overrides = {}) {
   return {
     prompt: "Make @1 lead into @2.",
-    version: "kling-3-omni",
+    version: "kling-v3-omni",
     size: "16:9",
     quality: "1080p",
     duration: "5",
@@ -31,11 +31,11 @@ function row(overrides = {}) {
 }
 
 assert.deepEqual(KLING_3_OMNI, {
-  endpoint: "/kling_3_omni_video",
-  queryEndpoint: "/kling_3_omni_video_query",
-  version: "kling-3-omni",
+  endpoint: "/kling_video_omni",
+  queryEndpoint: "/kling_video_omni_query",
+  version: "kling-v3-omni",
   sizes: ["16:9", "9:16", "1:1"],
-  qualities: ["720p", "1080p", "4k"],
+  qualities: ["720p", "1080p"],
   durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
 });
 
@@ -64,19 +64,16 @@ const image = { type: "image", url: "https://cdn.example/image.png", width: 1200
 const video = { type: "video", url: "https://cdn.example/clip.mov", width: 1280, height: 720, duration: 8, fps: 30, size: 2048 };
 assert.equal(validateKling3OmniRow(row({ refs: [image, video] })), "");
 assert.deepEqual(buildKling3OmniPayload(row({ refs: [image, video] })), {
-  contents: [
-    { type: "prompt", text: "Make image_1 lead into video_1." },
-    { type: "refer_image", image_url: image.url, id: "image_1" },
-    { type: "feature_video", video_url: video.url, id: "video_1" }
-  ],
-  settings: {
-    resolution: "1080p",
-    duration: 5,
-    audio: "original",
-    multi_shot: false,
-    aspect_ratio: "16:9"
-  },
-  options: {}
+  prompt: "Make <<image_1>> lead into <<video_1>>.",
+  generate_mode: "multi_reference",
+  reference_images: [image.url],
+  reference_video: video.url,
+  duration: 5,
+  keep_video_sound: true,
+  mode: "pro",
+  aspect_ratio: "16:9",
+  model_name: "kling-v3-omni",
+  sound: "off"
 });
 
 assert.throws(
@@ -84,9 +81,32 @@ assert.throws(
   /Kling 3 Omni 最多只能添加一个参考视频/
 );
 
-assert.equal(buildKling3OmniPayload(row({ refs: [image], generateAudio: false })).settings.audio, "off");
-assert.equal(buildKling3OmniPayload(row({ refs: [image] })).settings.audio, "native");
-assert.equal(buildKling3OmniPayload(row()).settings.audio, "native");
+assert.equal(
+  buildKling3OmniPayload(row({ prompt: "Use @1 then @2.", refs: [video, image] })).prompt,
+  "Use <<video_1>> then <<image_1>>."
+);
+assert.equal(buildKling3OmniPayload(row({ refs: [image], quality: "720p" })).mode, "std");
+assert.deepEqual(
+  {
+    keepVideoSound: buildKling3OmniPayload(row({ refs: [image], generateAudio: false })).keep_video_sound,
+    sound: buildKling3OmniPayload(row({ refs: [image], generateAudio: false })).sound
+  },
+  { keepVideoSound: false, sound: "off" }
+);
+assert.deepEqual(
+  {
+    keepVideoSound: buildKling3OmniPayload(row({ refs: [image] })).keep_video_sound,
+    sound: buildKling3OmniPayload(row({ refs: [image] })).sound
+  },
+  { keepVideoSound: false, sound: "on" }
+);
+assert.deepEqual(
+  {
+    keepVideoSound: buildKling3OmniPayload(row()).keep_video_sound,
+    sound: buildKling3OmniPayload(row()).sound
+  },
+  { keepVideoSound: false, sound: "on" }
+);
 
 assert.match(validateKling3OmniRow(row({ prompt: "" })), /Prompt.*不能为空/);
 assert.match(validateKling3OmniRow(row({ prompt: "x".repeat(3073) })), /3072/);
@@ -95,6 +115,10 @@ assert.match(validateKling3OmniRow(row({ duration: "3.5" })), /时长/);
 assert.match(validateKling3OmniRow(row({ refs: [{ type: "audio", url: "https://cdn.example/sound.mp3" }] })), /音频/);
 assert.match(validateKling3OmniRow(row({ prompt: "", refs: [{ type: "audio", url: "https://cdn.example/sound.mp3" }] })), /音频/);
 assert.match(validateKling3OmniRow(row({ refs: [image, video, { ...video, url: "https://cdn.example/second.mp4" }] })), /最多/);
+assert.equal(validateKling3OmniRow(row({ refs: Array.from({ length: 7 }, (_, index) => ({ ...image, url: `${image.url}?i=${index}` })) })), "");
+assert.match(validateKling3OmniRow(row({ refs: Array.from({ length: 8 }, (_, index) => ({ ...image, url: `${image.url}?i=${index}` })) })), /7/);
+assert.equal(validateKling3OmniRow(row({ refs: [video, ...Array.from({ length: 4 }, (_, index) => ({ ...image, url: `${image.url}?i=${index}` }))] })), "");
+assert.match(validateKling3OmniRow(row({ refs: [video, ...Array.from({ length: 5 }, (_, index) => ({ ...image, url: `${image.url}?i=${index}` }))] })), /4/);
 
 assert.match(validateKling3OmniRow(row({ refs: [{ ...image, width: 299 }] })), /300/);
 assert.match(validateKling3OmniRow(row({ refs: [{ ...image, width: 300, height: 1000 }] })), /比例/);
@@ -255,6 +279,7 @@ assert.match(appSource, /function buildSeedance2Payload\(row\)[\s\S]*?resolution
 assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?generateAudio/);
 assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
 assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/prompt-detail-utils\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts and prompt detail utilities must load before app.js");
+assert.match(pageSource, /model-contracts\.js\?v=release-20260730-kling-omni-gateway/, "Kling contract fix must bypass cached model metadata");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");
