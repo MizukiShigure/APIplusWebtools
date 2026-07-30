@@ -1955,6 +1955,20 @@ input:disabled {
   gap: 8px;
 }
 
+.prompt-detail-ref-insertable {
+  cursor: copy;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.prompt-detail-ref-insertable:hover {
+  border-color: var(--primary);
+  background: #f5f9ff;
+}
+
+.prompt-detail-ref-dragging {
+  opacity: 0.55;
+}
+
 .prompt-detail-ref-title {
   font-weight: 700;
 }

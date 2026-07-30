@@ -45,4 +45,15 @@ for (const type of ["image", "imageVideo", "motion", "avatar", "multi", "viduRef
   assert(app.includes(`createPromptDetailContext(row, "${type}")`), `missing ${type} prompt context binding`);
 }
 
+assert(app.includes('const PROMPT_DETAIL_TOKEN_MIME = "application/x-api-prompt-token";'), "missing prompt token drag MIME");
+assert(app.includes("function insertPromptDetailToken(token, selectionStart, selectionEnd)"), "missing shared detail token insertion");
+assert(app.includes("insertPromptToken(textarea.value, selectionStart, selectionEnd, token)"), "click and fallback must use the pure insertion helper");
+assert(app.includes('data-prompt-detail-token="${escapeAttr(token)}"'), "multimodal reference cards must expose their token");
+assert(app.includes('event.dataTransfer.setData("text/plain", token)'), "drag must offer native text insertion");
+assert(app.includes("if (refreshPromptDetailLockState())"), "reference interactions must recheck the active row lock");
+assert(app.includes("textarea.value !== valueBeforeDrop"), "drop must detect browser-native pointer insertion");
+assert(app.includes("insertPromptDetailToken(token, textarea.selectionStart, textarea.selectionEnd)"), "drop must fall back to the textarea selection");
+assert(styles.includes(".prompt-detail-ref-insertable"), "missing insertable reference styling");
+assert(styles.includes(".prompt-detail-ref-dragging"), "missing dragging reference styling");
+
 console.log("prompt-detail-panel checks passed");

@@ -11,6 +11,7 @@ const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
 const PROMPT_DETAIL_UTILS = globalThis.ApiBatchPromptDetailUtils;
 const { insertPromptToken } = PROMPT_DETAIL_UTILS;
 const PROMPT_DETAIL_SAVE_DELAY_MS = 180;
+const PROMPT_DETAIL_TOKEN_MIME = "application/x-api-prompt-token";
 let promptDetailSession = null;
 const {
   KLING_3_OMNI,
@@ -4529,9 +4530,10 @@ function createPromptDetailContext(row, type) {
   return context;
 }
 
-function renderPromptDetailReference(entry) {
+function renderPromptDetailReference(entry, { insertable = false } = {}) {
   const item = entry.asset || entry;
   const title = entry.label || item.name || "参考素材";
+  const token = insertable && /^@\d+$/.test(title) ? title : "";
   const source = item.preview || item.url;
   const displayName = shortAssetName(item.name || item.url || "打开文件", 42);
   const media = item.type === "video"
@@ -4540,7 +4542,8 @@ function renderPromptDetailReference(entry) {
       ? `<audio src="${escapeAttr(item.url)}" controls preload="metadata"></audio>`
       : `<img src="${escapeAttr(source)}" loading="lazy" decoding="async" alt="">`;
   return `
-    <article class="prompt-detail-ref-card">
+    <article class="prompt-detail-ref-card"
+      ${token ? `data-prompt-detail-token="${escapeAttr(token)}" draggable="true" title="点击或拖到 Prompt 中插入 ${escapeAttr(token)}"` : ""}>
       <div class="prompt-detail-ref-title">${escapeHtml(title)}</div>
       <div class="prompt-detail-ref-media">${media}</div>
       <div class="meta-line">${escapeHtml(assetMeta(item))}</div>
@@ -4614,6 +4617,18 @@ function applyPromptDetailTextareaValue() {
   return true;
 }
 
+function insertPromptDetailToken(token, selectionStart, selectionEnd) {
+  if (!promptDetailSession || refreshPromptDetailLockState()) return false;
+  const textarea = promptDetailSession.overlay.querySelector("[data-prompt-detail-prompt]");
+  const result = insertPromptToken(textarea.value, selectionStart, selectionEnd, token);
+  textarea.value = result.value;
+  textarea.focus();
+  textarea.setSelectionRange(result.caret, result.caret);
+  promptDetailSession.selectionStart = result.caret;
+  promptDetailSession.selectionEnd = result.caret;
+  return applyPromptDetailTextareaValue();
+}
+
 function openPromptDetailPanel(context) {
   if (promptDetailSession) flushPromptDetailPersist();
   const overlay = ensurePromptDetailOverlay();
@@ -4671,6 +4686,7 @@ function ensurePromptDetailOverlay() {
     </section>
   `;
   const textarea = overlay.querySelector("[data-prompt-detail-prompt]");
+  const refsBox = overlay.querySelector("[data-prompt-detail-refs]");
   overlay.addEventListener("click", event => {
     if (event.target === overlay) closePromptDetailPanel();
   });
@@ -4678,6 +4694,40 @@ function ensurePromptDetailOverlay() {
   overlay.querySelector("[data-prompt-detail-copy]").addEventListener("click", () => {
     copyPromptText(overlay.querySelector("[data-prompt-detail-prompt]").value);
   });
+  refsBox.addEventListener("pointerdown", event => {
+    const card = event.target.closest("[data-prompt-detail-token]");
+    if (!card || !promptDetailSession) return;
+    promptDetailSession.selectionStart = textarea.selectionStart;
+    promptDetailSession.selectionEnd = textarea.selectionEnd;
+  });
+  refsBox.addEventListener("click", event => {
+    const card = event.target.closest("[data-prompt-detail-token]");
+    if (!card || event.target.closest("a, button, input, textarea, select, video, audio")) return;
+    if (refreshPromptDetailLockState()) return;
+    insertPromptDetailToken(
+      card.dataset.promptDetailToken,
+      promptDetailSession.selectionStart,
+      promptDetailSession.selectionEnd
+    );
+  });
+  refsBox.addEventListener("dragstart", event => {
+    const card = event.target.closest("[data-prompt-detail-token]");
+    if (!card || !event.dataTransfer || refreshPromptDetailLockState()) {
+      event.preventDefault();
+      return;
+    }
+    const token = card.dataset.promptDetailToken;
+    promptDetailSession.dragToken = token;
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(PROMPT_DETAIL_TOKEN_MIME, token);
+    event.dataTransfer.setData("text/plain", token);
+    card.classList.add("prompt-detail-ref-dragging");
+  });
+  refsBox.addEventListener("dragend", event => {
+    event.target.closest("[data-prompt-detail-token]")?.classList.remove("prompt-detail-ref-dragging");
+    if (promptDetailSession) promptDetailSession.dragToken = "";
+  });
+
   textarea.addEventListener("input", applyPromptDetailTextareaValue);
   textarea.addEventListener("blur", flushPromptDetailPersist);
   ["select", "click", "keyup"].forEach(type => {
@@ -4688,6 +4738,29 @@ function ensurePromptDetailOverlay() {
       refreshPromptDetailLockState();
     });
   });
+  textarea.addEventListener("dragover", event => {
+    if (!promptDetailSession?.dragToken) return;
+    if (refreshPromptDetailLockState()) event.preventDefault();
+  });
+  textarea.addEventListener("drop", event => {
+    const token = event.dataTransfer?.getData(PROMPT_DETAIL_TOKEN_MIME) || promptDetailSession?.dragToken;
+    if (!token) return;
+    if (refreshPromptDetailLockState()) {
+      event.preventDefault();
+      return;
+    }
+    const valueBeforeDrop = textarea.value;
+    setTimeout(() => {
+      if (!promptDetailSession) return;
+      if (textarea.value !== valueBeforeDrop) {
+        applyPromptDetailTextareaValue();
+      } else {
+        insertPromptDetailToken(token, textarea.selectionStart, textarea.selectionEnd);
+      }
+      promptDetailSession.dragToken = "";
+    }, 0);
+  });
+
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && overlay.classList.contains("open")) closePromptDetailPanel();
   });
