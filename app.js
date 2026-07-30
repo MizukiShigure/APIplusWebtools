@@ -16,6 +16,8 @@ let promptDetailSession = null;
 const {
   KLING_3_OMNI,
   MINIMAX_H3,
+  SEEDANCE_2,
+  buildSeedance2FirstLastPayload,
   formatProviderError,
   nearestQualityOption,
   seedance2QualityOptions
@@ -422,20 +424,14 @@ const IMAGE_VIDEO_MODELS = {
     }
   },
   seedance: {
-    label: "Seedance",
+    label: "Seedance 1.5 Pro",
     endpoint: "/seedance",
     queryEndpoint: "/seedance_query",
     async: true,
-    versions: [
-      { label: "Seedance 1.5 Pro", value: "seedance-1.5-pro" },
-      { label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" }
-    ],
+    versions: [{ label: "Seedance 1.5 Pro", value: "seedance-1.5-pro" }],
     sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
     qualities: ["480p", "720p", "1080p"],
-    qualitiesFor(row) {
-      return row.version === "doubao-seedance-2-0-260128" ? seedance2QualityOptions(row.version) : this.qualities;
-    },
-    durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
+    durations: Array.from({ length: 9 }, (_, index) => String(index + 4)),
     supportsTextOnly: true,
     supportsFirstFrame: true,
     supportsLastFrame: true,
@@ -453,21 +449,24 @@ const IMAGE_VIDEO_MODELS = {
   },
   seedance2: {
     label: "Seedance 2.0",
-    endpoint: "/seedance",
-    queryEndpoint: "/seedance_query",
+    endpoint: SEEDANCE_2.endpoint,
+    queryEndpoint: SEEDANCE_2.queryEndpoint,
     async: true,
-    versions: [{ label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" }],
-    sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
-    qualities: seedance2QualityOptions("doubao-seedance-2-0-260128"),
+    versions: [{ label: "Seedance 2.0", value: SEEDANCE_2.version }],
+    sizes: SEEDANCE_2.sizes,
+    qualities: SEEDANCE_2.qualities,
     qualitiesFor(row) {
       return seedance2QualityOptions(row.version);
     },
-    durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
+    durations: SEEDANCE_2.durations,
     supportsTextOnly: true,
     supportsFirstFrame: true,
     supportsLastFrame: true,
     build(row) {
-      return IMAGE_VIDEO_MODELS.seedance.build(row);
+      return buildSeedance2FirstLastPayload({
+        ...row,
+        size: resolvedImageVideoSize(row)
+      });
     }
   },
   vidu: {
@@ -2114,7 +2113,9 @@ function normalizeViduRefVersion(value) {
 function normalizeImageVideoRows(value) {
   if (!Array.isArray(value) || value.length === 0) return defaultImageVideoRows();
   return value.map(item => {
-    const model = IMAGE_VIDEO_MODELS[item?.model] ? item.model : "hailuo";
+    const model = item?.model === "seedance" && item?.version === SEEDANCE_2.version
+      ? "seedance2"
+      : (IMAGE_VIDEO_MODELS[item?.model] ? item.model : "hailuo");
     const config = IMAGE_VIDEO_MODELS[model];
     const version = model === "vidu" ? normalizeViduImageVideoVersion(item?.version) : item?.version;
     const row = createImageVideoRow({

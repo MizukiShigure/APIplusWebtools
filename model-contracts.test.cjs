@@ -6,9 +6,11 @@ const path = require("node:path");
 const {
   KLING_3_OMNI,
   MINIMAX_H3,
+  SEEDANCE_2,
   buildKling3OmniPayload,
   buildMiniMaxH3FirstLastPayload,
   buildMiniMaxH3MultiPayload,
+  buildSeedance2FirstLastPayload,
   formatProviderError,
   nearestQualityOption,
   seedance2QualityOptions,
@@ -41,6 +43,42 @@ assert.deepEqual(KLING_3_OMNI, {
 
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-260128"), ["480p", "720p", "1080p", "4k"]);
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-fast-260128"), ["480p", "720p"]);
+
+assert.deepEqual(SEEDANCE_2, {
+  endpoint: "/seedance2",
+  queryEndpoint: "/seedance2_query",
+  version: "doubao-seedance-2-0-260128",
+  sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+  qualities: ["480p", "720p", "1080p", "4k"],
+  durations: ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
+});
+
+const seedance2FirstLastPayload = buildSeedance2FirstLastPayload({
+  prompt: "Animate the portrait",
+  version: SEEDANCE_2.version,
+  size: "9:16",
+  quality: "1080p",
+  duration: "12",
+  generateAudio: true,
+  firstFrame: { url: "https://cdn.example/seedance-first.png" },
+  lastFrame: { url: "https://cdn.example/seedance-last.png" }
+});
+assert.deepEqual(seedance2FirstLastPayload, {
+  prompt: "Animate the portrait",
+  generate_audio: true,
+  ratio: "9:16",
+  duration: 12,
+  resolution: "1080p",
+  web_search: false,
+  first_frame_image: "https://cdn.example/seedance-first.png",
+  last_frame_image: "https://cdn.example/seedance-last.png"
+});
+assert.equal(Object.hasOwn(seedance2FirstLastPayload, "model_name"), false);
+assert.equal(
+  buildSeedance2FirstLastPayload({ prompt: "Text only", size: "16:9", quality: "720p", duration: "4", generateAudio: false }).generate_audio,
+  false
+);
+assert.equal(Object.hasOwn(buildSeedance2FirstLastPayload({ prompt: "Text only", size: "16:9", quality: "720p", duration: "4" }), "first_frame_image"), false);
 assert.equal(nearestQualityOption("4k", ["480p", "720p"]), "720p");
 assert.equal(nearestQualityOption("4k", ["480p", "720p", "1080p"]), "1080p");
 assert.equal(nearestQualityOption("1080p", ["480p", "720p"]), "720p");
@@ -267,11 +305,17 @@ const imageVideoModelsSource = appSource.slice(
   appSource.indexOf("const IMAGE_VIDEO_MODELS"),
   appSource.indexOf("const MULTI_VIDEO_MODELS")
 );
+const legacySeedanceImageVideoSource = imageVideoModelsSource.slice(
+  imageVideoModelsSource.indexOf("seedance:"),
+  imageVideoModelsSource.indexOf("seedance2:")
+);
 assert.match(multiVideoModelsSource, /kling3Omni:\s*\{[\s\S]*?supportsGenerateAudio:\s*true,/);
 assert.doesNotMatch(seedanceModelSource, /supportsGenerateAudio\s*:/);
-assert.match(appSource, /const \{[^}]*KLING_3_OMNI[^}]*seedance2QualityOptions[^}]*\} = MODEL_CONTRACTS;/, "app must consume the Seedance 2 quality contract");
-assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}[\s\S]*?qualitiesFor\(row\)\s*\{\s*return row\.version === "doubao-seedance-2-0-260128" \? seedance2QualityOptions\(row\.version\) : this\.qualities;\s*\}/, "mixed Seedance image-video entry must delegate 2.0 qualities to the contract");
-assert.match(imageVideoModelsSource, /seedance2:\s*\{[\s\S]*?versions: \[\{ label: "Seedance 2\.0", value: "doubao-seedance-2-0-260128" \}\][\s\S]*?qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "dedicated Seedance 2 image-video entry must delegate qualities to the contract");
+assert.match(appSource, /const \{[^}]*KLING_3_OMNI[^}]*SEEDANCE_2[^}]*seedance2QualityOptions[^}]*\} = MODEL_CONTRACTS;/, "app must consume the Seedance 2 gateway contract");
+assert.doesNotMatch(legacySeedanceImageVideoSource, /doubao-seedance-2-0-260128/, "legacy /seedance route must not offer Seedance 2.0");
+assert.match(imageVideoModelsSource, /seedance2:\s*\{[\s\S]*?endpoint:\s*SEEDANCE_2\.endpoint[\s\S]*?queryEndpoint:\s*SEEDANCE_2\.queryEndpoint[\s\S]*?buildSeedance2FirstLastPayload/, "dedicated Seedance 2 image-video entry must use the /seedance2 gateway contract");
+assert.match(appSource, /item\?\.model === "seedance" && item\?\.version === SEEDANCE_2\.version\s*\?\s*"seedance2"/, "saved Seedance 2.0 rows must migrate away from the legacy /seedance route");
+assert.match(imageVideoModelsSource, /seedance2:\s*\{[\s\S]*?qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "dedicated Seedance 2 image-video entry must delegate qualities to the contract");
 assert.match(seedanceModelSource, /qualitiesFor\(row\)\s*\{\s*return seedance2QualityOptions\(row\.version\);\s*\}/, "multimodal Seedance must delegate version qualities to the contract");
 assert.doesNotMatch(seedanceModelSource, /qualitiesByVersion\s*:/, "multimodal Seedance must not duplicate version quality rules");
 assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?build\(row\)\s*\{[\s\S]*?resolution: row\.quality \|\| undefined/, "Seedance image-video requests must send the selected resolution");
@@ -279,7 +323,8 @@ assert.match(appSource, /function buildSeedance2Payload\(row\)[\s\S]*?resolution
 assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?generateAudio/);
 assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
 assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/prompt-detail-utils\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts and prompt detail utilities must load before app.js");
-assert.match(pageSource, /model-contracts\.js\?v=release-20260730-kling-omni-gateway/, "Kling contract fix must bypass cached model metadata");
+assert.match(pageSource, /model-contracts\.js\?v=release-20260730-seedance2-image-video/, "Seedance 2 image-video fix must bypass cached model metadata");
+assert.match(pageSource, /app\.js\?v=release-20260730-seedance2-image-video/, "Seedance 2 image-video fix must bypass cached application code");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");

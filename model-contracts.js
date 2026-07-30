@@ -11,6 +11,14 @@
     qualities: ["720p", "1080p"],
     durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
   };
+  const SEEDANCE_2 = {
+    endpoint: "/seedance2",
+    queryEndpoint: "/seedance2_query",
+    version: "doubao-seedance-2-0-260128",
+    sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
+    qualities: ["480p", "720p", "1080p", "4k"],
+    durations: ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
+  };
 
   const MINIMAX_H3 = {
     endpoint: "/minimax_h3",
@@ -30,6 +38,22 @@
     return version === "doubao-seedance-2-0-fast-260128"
       ? ["480p", "720p"]
       : ["480p", "720p", "1080p", "4k"];
+  }
+
+  function buildSeedance2FirstLastPayload(row = {}) {
+    const payload = {
+      prompt: String(row.prompt || "").trim() || undefined,
+      generate_audio: row.generateAudio !== false,
+      ratio: row.size || undefined,
+      duration: Number(row.duration || 5),
+      resolution: row.quality || undefined,
+      web_search: Boolean(row.webSearch)
+    };
+    const firstFrame = String(row.firstFrame?.url || "").trim();
+    const lastFrame = String(row.lastFrame?.url || "").trim();
+    if (firstFrame) payload.first_frame_image = firstFrame;
+    if (lastFrame) payload.last_frame_image = lastFrame;
+    return payload;
   }
 
   function nearestQualityOption(current, options, fallback = "") {
@@ -323,9 +347,11 @@
     KLING_3_OMNI,
     MINIMAX_H3,
     buildKling3OmniPayload,
+    SEEDANCE_2,
     buildMiniMaxH3FirstLastPayload,
     buildMiniMaxH3MultiPayload,
     formatProviderError,
+    buildSeedance2FirstLastPayload,
     nearestQualityOption,
     seedance2QualityOptions,
     validateKling3OmniRow,
