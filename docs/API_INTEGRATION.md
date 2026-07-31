@@ -144,3 +144,5 @@ The supported automation boundary is `http://127.0.0.1:4198/api/agent/v1`. Authe
 Supported task families are `image`, `imageVideo`, `motion`, `multiVideo`, and `avatar`. Clients must query capabilities before constructing model-specific input. See [the bundled Agent reference](../skills/api-plus-agent/references/agent-api.md) for the envelope and asset-key map.
 
 The API intentionally has no Agent delete endpoint. Keep `clientTaskId` stable across retries; changing it creates a new logical generation request.
+
+The browser worker automatically obtains a fresh same-origin control session and re-registers after the local service restarts. Tasks that already have upstream IDs resume polling; a task interrupted while submitting without an upstream ID becomes `submission-unknown` and is never auto-resubmitted.

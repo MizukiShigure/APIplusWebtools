@@ -203,6 +203,16 @@
       await request(`/assets/${encodeURIComponent(asset.assetId)}/ack`, { method: "POST", body: {} });
     }
 
+    async function registerWorker() {
+      await request("/session", { method: "GET" });
+      const registered = await request("/worker/register", {
+        method: "POST",
+        body: { workerId, label, capabilities: await options.getCapabilities() }
+      });
+      state.leaseMs = Number(registered.leaseMs || state.leaseMs);
+      return registered;
+    }
+
     async function runOnce() {
       if (!state.running || runningCycle) return null;
       runningCycle = true;
@@ -213,7 +223,14 @@
           publish();
           return null;
         }
-        const heartbeat = await request("/worker/heartbeat", { method: "POST", body: { workerId } });
+        let heartbeat;
+        try {
+          heartbeat = await request("/worker/heartbeat", { method: "POST", body: { workerId } });
+        } catch (error) {
+          if (![401, 404].includes(Number(error?.status))) throw error;
+          await registerWorker();
+          heartbeat = await request("/worker/heartbeat", { method: "POST", body: { workerId } });
+        }
         state.lastHeartbeatAt = Date.now();
         for (const taskId of heartbeat.cancelTaskIds || []) {
           if (typeof options.cancelTask === "function") await options.cancelTask(String(taskId));
@@ -270,12 +287,7 @@
           schedule(heartbeatMs);
           return clone(state);
         }
-        await request("/session", { method: "GET" });
-        const registered = await request("/worker/register", {
-          method: "POST",
-          body: { workerId, label, capabilities: await options.getCapabilities() }
-        });
-        state.leaseMs = Number(registered.leaseMs || state.leaseMs);
+        await registerWorker();
         setConnected();
         schedule(0);
         return clone(state);
