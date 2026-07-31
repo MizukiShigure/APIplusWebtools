@@ -1741,6 +1741,97 @@ input:disabled {
   gap: 12px;
 }
 
+.agent-settings-panel {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
+  overflow: auto;
+  background: #fff;
+}
+
+.agent-side-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.agent-settings-status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-settings-status-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 9px;
+}
+
+.agent-settings-status-grid span,
+.agent-settings-status-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-settings-status-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.agent-settings-inline,
+.agent-settings-token-row,
+.agent-settings-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-settings-inline input,
+.agent-settings-token-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-settings-token-row {
+  align-items: stretch;
+}
+
+.agent-settings-section-head {
+  justify-content: space-between;
+}
+
+.agent-settings-section-head h3,
+.agent-settings-section-head p {
+  margin: 0;
+}
+
+.agent-remote-locked {
+  opacity: .72;
+}
+
+.inline-success {
+  border: 1px solid #a7f3d0;
+  border-radius: 7px;
+  background: #ecfdf5;
+  color: #047857;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .agent-settings-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-settings-inline,
+  .agent-settings-token-row,
+  .agent-settings-section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 .runninghub-wizard-panel textarea {
   font-family: Consolas, "SFMono-Regular", monospace;
   font-size: 12px;

@@ -1043,6 +1043,11 @@ const state = {
   agentBrowserId: localStorage.getItem(STORAGE_KEYS.agentBrowserId) || uid("browser"),
   agentBrowserLabel: localStorage.getItem(STORAGE_KEYS.agentBrowserLabel) || "本机浏览器",
   agentWorkerStatus: { connection: "offline", active: false, lastError: "" },
+  agentSettingsOpen: false,
+  agentSettingsLoading: false,
+  agentSettingsTokenVisible: false,
+  agentSettingsData: { token: "", rotatable: false, worker: { online: false }, queue: {} },
+  agentSettingsMessage: "",
   queue: [],
   running: 0,
   imageVideoQueue: [],
@@ -2558,6 +2563,156 @@ function renderRunningHubParamList(config) {
   `;
 }
 
+function agentQueueCount(queue, states) {
+  return states.reduce((total, name) => total + Number(queue?.[name] || 0), 0);
+}
+
+function agentQueueSummary() {
+  const queue = state.agentSettingsData?.queue || {};
+  return {
+    pending: agentQueueCount(queue, ["waiting_for_worker", "pending", "queued"]),
+    active: agentQueueCount(queue, ["claimed", "validating", "uploading", "submitting", "submitted", "partial"]),
+    recovery: agentQueueCount(queue, ["polling", "submission-unknown"])
+  };
+}
+
+function agentWorkerStatusLabel() {
+  const local = state.agentWorkerStatus || {};
+  const server = state.agentSettingsData?.worker || {};
+  if (local.connection === "online" && local.active) return "在线（当前标签执行）";
+  if (local.connection === "standby") return server.online ? `待命（${server.label || "其他标签"}执行）` : "待命";
+  if (server.online) return `在线（${server.label || "浏览器执行器"}）`;
+  if (local.connection === "offline" && local.lastError) return "离线（连接异常）";
+  return "离线";
+}
+
+function renderAgentApiStatusCard() {
+  return `
+    <section class="side-config side-status-card agent-side-card">
+      <div>
+        <strong>Agent API</strong>
+        <span id="agentApiStatusText">执行器：${escapeHtml(agentWorkerStatusLabel())}</span>
+        <span>仅限本机 · 127.0.0.1</span>
+      </div>
+      <button id="openAgentApiSettings" class="tiny-button" type="button">打开设置</button>
+    </section>
+  `;
+}
+
+function renderAgentApiSettingsDialog() {
+  const data = state.agentSettingsData || {};
+  const summary = agentQueueSummary();
+  const tokenType = state.agentSettingsTokenVisible ? "text" : "password";
+  const baseUrl = location.protocol === "file:" ? "http://127.0.0.1:4198/api/agent/v1" : `${location.origin}/api/agent/v1`;
+  return `
+    <div class="overlay-modal agent-settings-overlay" role="dialog" aria-modal="true" aria-labelledby="agentSettingsTitle">
+      <section class="overlay-panel agent-settings-panel">
+        <div class="modal-head">
+          <div>
+            <h2 id="agentSettingsTitle">Agent API 设置</h2>
+            <p class="muted-note">Codex、Minimax Code 等 Agent 通过本机接口提交，当前浏览器标签负责执行。</p>
+          </div>
+          <button id="closeAgentApiSettings" class="ghost-button" type="button">关闭</button>
+        </div>
+
+        <section class="config-section agent-settings-section">
+          <div class="agent-settings-status-grid" aria-live="polite">
+            <div><span>访问范围</span><strong>本机专用</strong><small>不监听局域网或公网</small></div>
+            <div><span>浏览器执行器</span><strong id="agentWorkerLiveStatus">${escapeHtml(agentWorkerStatusLabel())}</strong><small id="agentWorkerLastError">${escapeHtml(state.agentWorkerStatus?.lastError || "保持一个页面标签打开")}</small></div>
+            <div><span>待处理</span><strong id="agentPendingCount">${summary.pending}</strong><small>等待执行器或进入队列</small></div>
+            <div><span>处理中</span><strong id="agentActiveCount">${summary.active}</strong><small>上传、提交或生成中</small></div>
+            <div><span>恢复任务</span><strong id="agentRecoveryCount">${summary.recovery}</strong><small>继续轮询或待确认</small></div>
+          </div>
+        </section>
+
+        <section class="config-section agent-settings-section">
+          <h3>本机连接</h3>
+          <label class="field">
+            <span>Agent API Base URL</span>
+            <input id="agentApiBaseUrl" value="${escapeAttr(baseUrl)}" readonly>
+          </label>
+          <label class="field">
+            <span>浏览器来源名称</span>
+            <div class="agent-settings-inline">
+              <input id="agentBrowserLabelInput" value="${escapeAttr(state.agentBrowserLabel)}" maxlength="128" spellcheck="false">
+              <button id="saveAgentBrowserLabel" class="button" type="button">保存并重连</button>
+            </div>
+          </label>
+        </section>
+
+        <section class="config-section agent-settings-section">
+          <h3>本机 Agent 令牌</h3>
+          <p class="muted-note">仅放入环境变量 <code>API_PLUS_AGENT_TOKEN</code>，不要写入提示词、源码或分享包。</p>
+          <div class="agent-settings-token-row">
+            <input id="agentTokenValue" type="${tokenType}" value="${escapeAttr(data.token || "")}" readonly autocomplete="off">
+            <button id="toggleAgentToken" class="button" type="button">${state.agentSettingsTokenVisible ? "隐藏" : "显示"}</button>
+            <button id="copyAgentToken" class="button" type="button" ${data.token ? "" : "disabled"}>复制</button>
+            <button id="rotateAgentToken" class="button danger" type="button" ${data.rotatable ? "" : "disabled"}>轮换</button>
+          </div>
+        </section>
+
+        <section class="config-section agent-settings-section agent-remote-locked">
+          <div class="agent-settings-section-head">
+            <div><h3>私有远程入口</h3><p class="muted-note">为以后通过私有网络访问预留，第一版不开放。</p></div>
+            <button class="button" type="button" disabled>暂未启用</button>
+          </div>
+        </section>
+
+        ${state.agentSettingsLoading ? `<div class="muted-note">正在读取本机 Agent 状态...</div>` : ""}
+        ${state.agentSettingsMessage ? `<div class="${state.agentSettingsMessage.startsWith("错误：") ? "inline-error" : "inline-success"}">${escapeHtml(state.agentSettingsMessage)}</div>` : ""}
+        <div class="dialog-actions">
+          <button id="refreshAgentApiSettings" class="button" type="button">刷新状态</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+async function loadAgentApiSettings() {
+  state.agentSettingsLoading = true;
+  state.agentSettingsMessage = "";
+  try {
+    const data = await controlHistoryRequest("/agent-auth");
+    if (!data) throw new Error("本机控制接口不可用");
+    state.agentSettingsData = {
+      token: String(data.token || ""),
+      rotatable: Boolean(data.rotatable),
+      worker: data.worker || { online: false },
+      queue: data.queue || {}
+    };
+  } catch (error) {
+    state.agentSettingsMessage = `错误：${error.message || "读取 Agent 状态失败"}`;
+  } finally {
+    state.agentSettingsLoading = false;
+  }
+  return state.agentSettingsData;
+}
+
+function refreshAgentSettingsStatus() {
+  const label = agentWorkerStatusLabel();
+  const sideStatus = document.querySelector("#agentApiStatusText");
+  if (sideStatus) sideStatus.textContent = `执行器：${label}`;
+  const liveStatus = document.querySelector("#agentWorkerLiveStatus");
+  if (liveStatus) liveStatus.textContent = label;
+  const error = document.querySelector("#agentWorkerLastError");
+  if (error) error.textContent = state.agentWorkerStatus?.lastError || "保持一个页面标签打开";
+  const summary = agentQueueSummary();
+  const pending = document.querySelector("#agentPendingCount");
+  const active = document.querySelector("#agentActiveCount");
+  const recovery = document.querySelector("#agentRecoveryCount");
+  if (pending) pending.textContent = String(summary.pending);
+  if (active) active.textContent = String(summary.active);
+  if (recovery) recovery.textContent = String(summary.recovery);
+}
+
+async function openAgentApiSettings() {
+  state.agentSettingsOpen = true;
+  state.agentSettingsLoading = true;
+  state.agentSettingsMessage = "";
+  render();
+  await loadAgentApiSettings();
+  if (state.agentSettingsOpen) render();
+}
 function renderRunningHubMotionConfig() {
   const settings = runningHubMotionSettings();
   const active = runningHubMotionConfig();
@@ -2702,6 +2857,7 @@ function render() {
             <input id="apiBase" type="url" spellcheck="false" value="${escapeAttr(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT)}">
           </label>
           ${renderRunningHubMotionConfig()}
+          ${renderAgentApiStatusCard()}
         </div>
         <nav class="nav-group">
           <div class="nav-label">任务类型</div>
@@ -2718,6 +2874,7 @@ function render() {
       <main class="workspace" id="workspace"></main>
     </div>
     ${state.runningHubMotionConfigOpen ? renderRunningHubMotionConfigWizard() : ""}
+    ${state.agentSettingsOpen ? renderAgentApiSettingsDialog() : ""}
   `;
   app.dataset.activePage = state.activePage;
   bindShell();
@@ -2876,6 +3033,48 @@ function bindShell() {
   });
   document.querySelector("#closeRunningHubMotionConfigWizard")?.addEventListener("click", closeRunningHubMotionConfigWizard);
   document.querySelector("#closeRunningHubMotionConfigWizardBottom")?.addEventListener("click", closeRunningHubMotionConfigWizard);
+  document.querySelector("#openAgentApiSettings")?.addEventListener("click", () => { openAgentApiSettings(); });
+  document.querySelector("#closeAgentApiSettings")?.addEventListener("click", closeAgentApiSettings);
+  document.querySelector("#refreshAgentApiSettings")?.addEventListener("click", async () => {
+    state.agentSettingsLoading = true;
+    state.agentSettingsMessage = "";
+    refreshAgentSettingsStatus();
+    await loadAgentApiSettings();
+    if (state.agentSettingsOpen) render();
+  });
+  document.querySelector("#toggleAgentToken")?.addEventListener("click", () => {
+    state.agentSettingsTokenVisible = !state.agentSettingsTokenVisible;
+    const input = document.querySelector("#agentTokenValue");
+    const button = document.querySelector("#toggleAgentToken");
+    if (input) input.type = state.agentSettingsTokenVisible ? "text" : "password";
+    if (button) button.textContent = state.agentSettingsTokenVisible ? "隐藏" : "显示";
+  });
+  document.querySelector("#copyAgentToken")?.addEventListener("click", () => {
+    const token = String(state.agentSettingsData?.token || "");
+    if (token) copyPromptText(token);
+  });
+  document.querySelector("#rotateAgentToken")?.addEventListener("click", async () => {
+    if (!state.agentSettingsData?.rotatable) return;
+    if (!window.confirm("轮换后，旧令牌会立即失效。继续吗？")) return;
+    try {
+      const data = await controlHistoryRequest("/agent-auth/rotate", { method: "POST", body: {} });
+      state.agentSettingsData.token = String(data?.token || "");
+      state.agentSettingsMessage = "令牌已轮换，请更新 Agent 环境变量。";
+    } catch (error) {
+      state.agentSettingsMessage = `错误：${error.message || "令牌轮换失败"}`;
+    }
+    if (state.agentSettingsOpen) render();
+  });
+  document.querySelector("#saveAgentBrowserLabel")?.addEventListener("click", async () => {
+    const input = document.querySelector("#agentBrowserLabelInput");
+    const label = String(input?.value || "").trim().slice(0, 128) || "本机浏览器";
+    state.agentBrowserLabel = label;
+    localStorage.setItem(STORAGE_KEYS.agentBrowserLabel, label);
+    state.agentSettingsMessage = "正在使用新的浏览器来源名称重连...";
+    await restartAgentWorker();
+    await loadAgentApiSettings();
+    if (state.agentSettingsOpen) render();
+  });
   document.querySelector("#runningHubImportUrl")?.addEventListener("input", event => {
     state.runningHubMotionConfigUrl = event.target.value;
   });
@@ -2922,6 +3121,20 @@ function bindShell() {
   document.querySelector("#clearDoneBtn").addEventListener("click", clearDoneRows);
 }
 
+function closeAgentApiSettings() {
+  state.agentSettingsOpen = false;
+  state.agentSettingsTokenVisible = false;
+  state.agentSettingsMessage = "";
+  render();
+}
+
+async function restartAgentWorker() {
+  if (agentWorker) agentWorker.stop();
+  agentWorker = null;
+  state.agentWorkerStatus = { connection: "offline", active: false, lastError: "" };
+  refreshAgentSettingsStatus();
+  return initializeAgentWorker();
+}
 function closeRunningHubMotionConfigWizard() {
   state.runningHubMotionConfigOpen = false;
   state.runningHubMotionConfigMessage = "";
@@ -13968,6 +14181,7 @@ async function initializeAgentWorker() {
     cancelTask: cancelAgentTask,
     onStatus(workerStatus) {
       state.agentWorkerStatus = workerStatus;
+      refreshAgentSettingsStatus();
     }
   });
   try {
