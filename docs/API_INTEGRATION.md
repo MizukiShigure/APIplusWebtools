@@ -126,3 +126,21 @@ The API key is user-supplied runtime configuration. Trim whitespace before placi
 - Confirm whether remote cancellation exists.
 - Add focused tests for payload mapping and invalid combinations.
 - Test one minimal live request only after static tests pass.
+
+## Local Agent API
+
+The supported automation boundary is `http://127.0.0.1:4198/api/agent/v1`. Authenticate with the environment-provided bearer token shown in the browser's Agent API settings. Do not embed the token in task payloads or source files.
+
+| Method | Route | Contract |
+| --- | --- | --- |
+| GET | `/capabilities` | Live task families and model parameter choices |
+| POST | `/assets` | Multipart `file` plus `mediaType`; returns a temporary asset descriptor |
+| POST | `/tasks` | Idempotent task envelope keyed by `clientTaskId` |
+| GET | `/tasks/:id` | Task state, upstream IDs, progress, results and errors |
+| GET | `/tasks/:id/events` | Append-only events after an optional sequence |
+| POST | `/tasks/:id/cancel` | Provider cancellation when configured, otherwise local cancellation |
+| GET | `/history?taskId=...` | Unified result metadata for one task |
+
+Supported task families are `image`, `imageVideo`, `motion`, `multiVideo`, and `avatar`. Clients must query capabilities before constructing model-specific input. See [the bundled Agent reference](../skills/api-plus-agent/references/agent-api.md) for the envelope and asset-key map.
+
+The API intentionally has no Agent delete endpoint. Keep `clientTaskId` stable across retries; changing it creates a new logical generation request.

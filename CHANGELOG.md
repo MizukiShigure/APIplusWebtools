@@ -1,5 +1,15 @@
 # Changelog
 
+## v2026.08.01-local-agent-api.1
+
+- Added an authenticated loopback-only Agent API with idempotent task submission and append-only task/history journals.
+- Added the browser-tab execution worker, lease recovery, upstream polling resume, optional provider cancellation, and duplicate-submission protection.
+- Unified browser and Agent generations in one history cache with source labels and source filtering.
+- Added the portable `api-plus-agent` Skill and dependency-free CLI for Codex, Minimax Code, and compatible local Agents.
+- Kept Agent callers append-only: only the manual browser UI can delete history records.
+- Moved Git-checkout server metadata to the external sibling `APIplusWebtools-data` directory while keeping a package-local `data` fallback for portable ZIP installs.
+- Expanded the privacy-clean engineering package with Agent runtime, tests, Skill, references, and deployment documentation while excluding tokens, journals, staged media, and personal state.
+
 ## v2026.07.28-engineering-package.1
 
 - Added a complete engineering handoff: Agent guide, architecture, development, API integration, data/privacy, contribution, and release documentation.

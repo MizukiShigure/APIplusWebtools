@@ -3,7 +3,22 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 if not defined PORT set "PORT=4198"
-set "URL=http://127.0.0.1:%PORT%/?v=release-20260728"
+set "HOST=127.0.0.1"
+set "API_BATCH_REMOTE_ACCESS=false"
+if not defined API_BATCH_DATA_DIR (
+  if exist "%~dp0.git" (
+    set "API_BATCH_DATA_DIR=%~dp0..\APIplusWebtools-data"
+  ) else (
+    set "API_BATCH_DATA_DIR=%~dp0data"
+  )
+)
+if not exist "%API_BATCH_DATA_DIR%" mkdir "%API_BATCH_DATA_DIR%"
+if errorlevel 1 (
+  echo Could not create data directory: %API_BATCH_DATA_DIR%
+  pause
+  exit /b 1
+)
+set "URL=http://127.0.0.1:%PORT%/?v=release-20260801-agent-api"
 set "NODE_EXE="
 
 where node >nul 2>nul

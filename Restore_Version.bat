@@ -20,7 +20,7 @@ if errorlevel 1 (
 echo Available versions:
 git tag --sort=-creatordate
 echo.
-set /p "TARGET_TAG=Type version tag to restore, for example v2026.07.28-engineering-package.1: "
+set /p "TARGET_TAG=Type version tag to restore, for example v2026.08.01-local-agent-api.1: "
 if "%TARGET_TAG%"=="" (
   echo No version selected.
   pause

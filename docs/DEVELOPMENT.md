@@ -127,3 +127,27 @@ A coding agent should begin by reporting:
 - the exact verification commands it will run.
 
 It should finish by reporting changed files, test results, package path when built, and anything it could not verify against a live provider.
+
+## Local Agent API And Skill
+
+The automation path consists of:
+
+- `agent-service.cjs`: authenticated localhost routes, staging, task/history journals, recovery.
+- `agent-runtime.js`: browser worker heartbeat, claim, report and cancellation protocol.
+- `agent-task-adapter.js`: task-family aliases, capability manifest and row mapping.
+- `skills/api-plus-agent`: portable Skill, reference, and dependency-free Node client.
+
+Run the focused checks while editing:
+
+```powershell
+node agent-service.test.cjs
+node agent-runtime.test.cjs
+node agent-task-adapter.test.cjs
+node agent-app-integration.test.cjs
+node agent-ui-contract.test.cjs
+node agent-skill-package.test.cjs
+```
+
+For Codex, copy/link `skills/api-plus-agent` into the configured Codex skills directory or keep it discoverable through this repository. For Minimax Code, register the same folder with its local skill/instruction discovery and invoke the bundled `api-plus-agent-client.mjs`. Both clients need `API_PLUS_AGENT_TOKEN` in their process environment.
+
+Never add direct provider credentials or company-gateway calls to the Skill. Extend the browser's model catalogs and adapters, then let `/capabilities` publish the change. Preserve append-only Agent permissions and localhost binding. A future private remote transport must add explicit authentication, TLS/tunnel boundaries, replay protection and operator opt-in rather than changing the default listener.

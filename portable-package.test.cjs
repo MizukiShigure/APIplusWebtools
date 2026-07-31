@@ -17,6 +17,16 @@ const expectedFiles = [
   "Stop_API_Tool.bat",
   "Update_From_Git.bat",
   "VERSION",
+  "agent-app-integration.test.cjs",
+  "agent-runtime-load.test.cjs",
+  "agent-runtime.js",
+  "agent-runtime.test.cjs",
+  "agent-service.cjs",
+  "agent-service.test.cjs",
+  "agent-skill-package.test.cjs",
+  "agent-task-adapter.js",
+  "agent-task-adapter.test.cjs",
+  "agent-ui-contract.test.cjs",
   "app.js",
   "compact-model-params-layout.test.cjs",
   "data/.keep",
@@ -28,13 +38,18 @@ const expectedFiles = [
   "docs/DEVELOPMENT.md",
   "docs/RELEASE_CHECKLIST.md",
   "ecosystem.config.cjs",
+  "history-origin-sync.test.cjs",
+  "history-origin-utils.js",
   "history-recovery.test.cjs",
   "history-viewer-group-navigation.test.cjs",
   "history-bridge.html",
   "index.html",
+  "launcher-agent-data.test.cjs",
   "launcher-contract.test.cjs",
   "launcher-pm2-owner.ps1",
   "launcher-port-query.ps1",
+  "local-event-store.cjs",
+  "local-event-store.test.cjs",
   "model-contracts.js",
   "model-contracts.test.cjs",
   "package.json",
@@ -47,7 +62,12 @@ const expectedFiles = [
   "row-completion-time.test.cjs",
   "runtime-behavior.test.cjs",
   "scripts/build-portable.ps1",
+  "server-agent-integration.test.cjs",
   "server.cjs",
+  "skills/api-plus-agent/SKILL.md",
+  "skills/api-plus-agent/agents/openai.yaml",
+  "skills/api-plus-agent/references/agent-api.md",
+  "skills/api-plus-agent/scripts/api-plus-agent-client.mjs",
   "start_multimodal_video_dev.bat",
   "styles.css",
   "ui-layout-contract.test.cjs"
@@ -116,8 +136,8 @@ const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
-  assert(version === "v2026.07.28-engineering-package.1", "VERSION must contain the release tag");
-  assert(changelog.includes("v2026.07.28-engineering-package.1"), "changelog must include the release tag");
+  assert(version === "v2026.08.01-local-agent-api.1", "VERSION must contain the release tag");
+  assert(changelog.includes("v2026.08.01-local-agent-api.1"), "changelog must include the release tag");
   assert(packageJson.scripts.start === "node server.cjs", "package start script must launch server.cjs");
   assert(packageJson.scripts.test.includes("portable-package.test.cjs"), "package test script must verify the distributable");
   assert(fs.existsSync(builder), "portable builder is missing");
@@ -139,6 +159,7 @@ try {
   const actualFiles = collectFiles(expandedPath).sort();
   assert(JSON.stringify(actualFiles) === JSON.stringify(expectedFiles), `unexpected portable contents: ${actualFiles.join(", ")}`);
   assert(!actualFiles.some(file => /(^|\/)(?:docs\/superpowers|task_plan\.md|findings\.md|progress\.md)$/i.test(file)), "portable package must not include planning notes");
+  assert(!actualFiles.some(file => /(?:agent-auth\.json|\.jsonl$|\/staging\/|\/journals?\/)/i.test(file)), "portable package must not include tokens, journals, or staged media");
   for (const folder of ["data", "runtime"]) {
     const entries = fs.readdirSync(path.join(expandedPath, folder));
     assert(entries.length === 1 && entries[0] === ".keep", `${folder} must contain only .keep`);
@@ -202,7 +223,7 @@ try {
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");
   assert(/if not exist "\.git"/i.test(updateScript), "Update_From_Git.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(updateScript), "Update_From_Git.bat must explain that a Git clone is required in a ZIP install");
-  assert(restoreScript.includes("v2026.07.28-engineering-package.1"), "Restore_Version.bat must show the current release tag example");
+  assert(restoreScript.includes("v2026.08.01-local-agent-api.1"), "Restore_Version.bat must show the current release tag example");
 
   console.log("portable-package checks passed");
 } finally {

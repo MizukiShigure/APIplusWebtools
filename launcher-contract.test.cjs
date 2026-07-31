@@ -81,7 +81,33 @@ assert(app.env.HOST === "127.0.0.1", "PM2 must bind to 127.0.0.1");
 assert(app.env.PORT === 4198 || ecosystemSource.includes("process.env.PORT || 4198"), "PM2 must default PORT to 4198");
 assert(app.autorestart === true, "PM2 must autorestart the app");
 assert(app.watch === false, "PM2 watch mode must be disabled");
+assert(typeof ecosystem.resolveLauncherDataDirectory === "function", "PM2 config must expose deterministic data-directory selection");
+const launcherDataFixture = fs.mkdtempSync(path.join(require("os").tmpdir(), "api-plus-launcher-data-"));
+try {
+  assert(
+    path.resolve(ecosystem.resolveLauncherDataDirectory(launcherDataFixture, {})) === path.resolve(launcherDataFixture, "data"),
+    "portable installs without .git must default to their local data directory"
+  );
+  fs.writeFileSync(path.join(launcherDataFixture, ".git"), "gitdir: fixture", "utf8");
+  assert(
+    path.resolve(ecosystem.resolveLauncherDataDirectory(launcherDataFixture, {})) === path.resolve(launcherDataFixture, "..", "APIplusWebtools-data"),
+    "Git worktrees must default to the external sibling data directory"
+  );
+  assert(
+    path.resolve(ecosystem.resolveLauncherDataDirectory(launcherDataFixture, { API_BATCH_DATA_DIR: path.join(launcherDataFixture, "override") })) === path.resolve(launcherDataFixture, "override"),
+    "an explicit API_BATCH_DATA_DIR must override launcher defaults"
+  );
+} finally {
+  fs.rmSync(launcherDataFixture, { recursive: true, force: true });
+}
 
+assert(start.includes('set "HOST=127.0.0.1"'), "launcher must explicitly bind the local service to loopback");
+assert(start.includes('set "API_BATCH_REMOTE_ACCESS=false"'), "launcher must keep private remote access disabled");
+assert(start.includes('if not defined API_BATCH_DATA_DIR'), "launcher must preserve an explicit data-directory override");
+assert(start.includes('if exist "%~dp0.git"'), "launcher must distinguish a Git checkout from a portable install");
+assert(start.includes(String.raw`set "API_BATCH_DATA_DIR=%~dp0..\APIplusWebtools-data"`), "Git checkout must use the external sibling data directory");
+assert(start.includes('set "API_BATCH_DATA_DIR=%~dp0data"'), "portable install must fall back to its packaged data directory");
+assert(start.includes('if not exist "%API_BATCH_DATA_DIR%"'), "launcher must create the selected data directory");
 assert(start.includes("where node"), "launcher must discover Node from PATH");
 assert(start.includes("runtime\\node.exe"), "launcher must discover project runtime Node");
 assert(start.includes("C:\\Program Files\\nodejs\\node.exe"), "launcher must discover Program Files Node");

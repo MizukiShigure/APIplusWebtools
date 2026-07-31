@@ -93,3 +93,25 @@ The same history data is mirrored in IndexedDB and the disk backup. Merge logic 
 - includes launchers, source, tests, engineering docs, and this Agent guide.
 
 `portable-package.test.cjs` is the executable contract for this boundary.
+
+## Local Agent Execution Plane
+
+`agent-service.cjs` exposes an authenticated, loopback-only append API. It persists task and history events before acknowledging writes. Agents never call providers directly.
+
+```mermaid
+flowchart LR
+  A["Codex / Minimax Code"] -->|Bearer token| L["Local Agent API"]
+  L --> J["Append-only task journal"]
+  B["Open browser tab"] -->|claim / heartbeat| L
+  B --> G["Configured company gateway"]
+  B -->|progress / results / history| L
+  L --> H["Unified history metadata"]
+```
+
+The browser worker validates the task against its live model catalogs, stages local assets, creates the normal UI row, and uses the existing queue/provider adapters. Browser and Agent records share the same history view but retain separate `origin` and `executedBy` metadata.
+
+Task journals distinguish `waiting_for_worker`, active execution, resumable `polling`, and non-retriable `submission-unknown`. A refresh with upstream IDs resumes polling; a lost lease during submission is not automatically replayed.
+
+The Agent store contains structured metadata and remote URLs, not full generated media. Staged input files are temporary and are removed after the browser worker consumes them. Agent routes have no delete/history-overwrite operation; destructive history actions remain in the browser control plane.
+
+Remote access is represented by `API_BATCH_REMOTE_ACCESS=false` but is not implemented or enabled in this release.

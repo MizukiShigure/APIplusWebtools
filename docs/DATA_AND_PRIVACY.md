@@ -112,3 +112,19 @@ The builder also rewrites the packaged API Base default to empty. `portable-pack
 - Do not expose the local server to a LAN without adding authentication and reviewing all routes.
 - Do not send a working project folder directly; send the generated ZIP or a clean Git clone.
 - Review the ZIP whenever new files are added to the package allowlist.
+
+## Agent Metadata And Backup
+
+The launcher chooses one authoritative server data directory:
+
+- Git clone/worktree: sibling `APIplusWebtools-data`, outside the source tree.
+- Portable ZIP: the package's `data` directory.
+- Explicit override: `API_BATCH_DATA_DIR`.
+
+It contains `history.json`, append-only task/history journals and snapshots, the local Agent token file, and temporary staged inputs. It does not copy completed remote image/video/audio bodies. Temporary staging files are consumed and removed by the browser worker.
+
+Stop the service before backup or migration, then copy the entire selected data directory as one unit. Restore it beside the matching project install before startup. Keep this directory private because task prompts, source labels, remote URLs, and the Agent bearer token are sensitive.
+
+Browser `localStorage` and IndexedDB remain scoped by browser profile, hostname, and port. The disk history bridge allows history metadata to merge back after refresh, but clearing a browser profile can still remove unsynced rows/settings. Do not replace a populated disk file with an empty browser export.
+
+Agent callers are append-only and cannot remove history. Only explicit manual browser actions can delete records. Rotating the Agent token invalidates old Agent clients and does not erase history.
