@@ -2,14 +2,17 @@ const http = require("http");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { createAgentService, resolveDataDirectory, validateLoopbackHost } = require("./agent-service.cjs");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4198);
 const host = process.env.HOST || "127.0.0.1";
-const dataDir = path.join(root, "data");
+if (!validateLoopbackHost(host)) throw new Error("HOST must remain loopback-only (127.0.0.1, localhost, or ::1)");
+const dataDir = resolveDataDirectory({ root, env: process.env });
 const historyFile = path.join(dataDir, "history.json");
 const appDataDir = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Internal_API_Batch");
 const fallbackHistoryFile = path.join(appDataDir, "history.json");
+const agentServicePromise = createAgentService({ root, dataDir });
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -73,10 +76,14 @@ async function writeJsonAtomic(file, value) {
 }
 
 async function writeHistoryBackup(payload) {
+  const current = await readHistoryBackup();
+  const incomingUploads = Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [];
+  const incomingGenerations = Array.isArray(payload.generationHistory) ? payload.generationHistory : [];
+  if (!incomingUploads.length && !incomingGenerations.length && (current.uploadHistory.length || current.generationHistory.length)) return current;
   const next = {
     updatedAt: new Date().toISOString(),
-    uploadHistory: Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [],
-    generationHistory: Array.isArray(payload.generationHistory) ? payload.generationHistory : []
+    uploadHistory: incomingUploads.length ? incomingUploads : current.uploadHistory,
+    generationHistory: incomingGenerations.length ? incomingGenerations : current.generationHistory
   };
   try {
     next.storagePath = await writeJsonAtomic(historyFile, next);
@@ -249,8 +256,10 @@ async function handleRunningHubQuery(request, response) {
   sendJson(response, 200, { success: true, data, raw });
 }
 
-async function routeApi(request, response, pathname) {
+async function routeApi(request, response, pathname, parsedUrl) {
   try {
+    const agentService = await agentServicePromise;
+    if (await agentService.route(request, response, pathname, parsedUrl)) return true;
     if (request.method === "GET" && pathname === "/api/local/history") {
       sendJson(response, 200, await readHistoryBackup());
       return true;
@@ -285,7 +294,7 @@ async function routeApi(request, response, pathname) {
 
 http.createServer(async (request, response) => {
   const parsed = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
-  const handled = await routeApi(request, response, parsed.pathname);
+  const handled = await routeApi(request, response, parsed.pathname, parsed);
   if (handled) return;
 
   const file = safePath(request.url || "/");
