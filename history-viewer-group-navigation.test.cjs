@@ -69,7 +69,7 @@ assert.deepEqual(
   "the cursor must resolve the exact generation result key"
 );
 assert.deepEqual(
-  helpers.findGroupedHistoryCursor(groups, { token: "legacy", item: { url: "b2.mp4" } }),
+  helpers.findGroupedHistoryCursor(groups, { token: String("legacy"), item: { url: "b2.mp4" } }),
   { groupIndex: 1, itemIndex: 1 },
   "legacy entries must fall back to URL matching"
 );

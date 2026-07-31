@@ -68,6 +68,7 @@ $publicFiles = @(
   "docs/RELEASE_CHECKLIST.md",
   "launcher-contract.test.cjs",
   "history-recovery.test.cjs",
+  "history-viewer-group-navigation.test.cjs",
   "portable-package.test.cjs",
   "prompt-detail-utils.test.cjs",
   "prompt-detail-panel.test.cjs",
@@ -77,7 +78,8 @@ $publicFiles = @(
   "dirty-row-state.test.cjs",
   "dirty-row-clear.test.cjs",
   "model-contracts.test.cjs",
-  "queue-refresh-resume.test.cjs"
+  "queue-refresh-resume.test.cjs",
+  "row-completion-time.test.cjs"
 )
 
 $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("internal-api-batch-portable-" + [guid]::NewGuid().ToString("N"))
