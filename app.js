@@ -11463,6 +11463,66 @@ function historyMediaItems(type = state.historyType) {
   }));
 }
 
+function generationHistoryNavigationGroups(type = state.historyType) {
+  const targetType = type || state.historyType;
+  return filteredGenerationInputGroups()
+    .map(group => ({
+      id: group.id,
+      items: group.items
+        .filter(item => item.type === targetType && item.url)
+        .map(item => ({
+          token: historyMediaToken(item),
+          item,
+          title: item.name || fileNameFromUrl(item.url, targetType || "media")
+        }))
+    }))
+    .filter(group => group.items.length);
+}
+
+function findGroupedHistoryCursor(groups, entry) {
+  const findCursor = predicate => {
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+      const itemIndex = groups[groupIndex].items.findIndex(predicate);
+      if (itemIndex >= 0) return { groupIndex, itemIndex };
+    }
+    return null;
+  };
+  if (entry?.item?.key) {
+    const byKey = findCursor(candidate => candidate.item?.key === entry.item.key);
+    if (byKey) return byKey;
+  }
+  if (entry?.token) {
+    const byToken = findCursor(candidate => candidate.token === entry.token);
+    if (byToken) return byToken;
+  }
+  if (entry?.item?.url) {
+    return findCursor(candidate => candidate.item?.url === entry.item.url);
+  }
+  return null;
+}
+
+function groupedHistoryNavigationTargets(groups, entry) {
+  const cursor = findGroupedHistoryCursor(groups, entry);
+  if (!cursor) return null;
+  const currentGroup = groups[cursor.groupIndex];
+  return {
+    cursor,
+    previousItem: currentGroup.items[cursor.itemIndex - 1] || null,
+    nextItem: currentGroup.items[cursor.itemIndex + 1] || null,
+    previousGroup: groups[cursor.groupIndex - 1]?.items[0] || null,
+    nextGroup: groups[cursor.groupIndex + 1]?.items[0] || null
+  };
+}
+
+function groupedHistoryDeleteTarget(groups, entry) {
+  const targets = groupedHistoryNavigationTargets(groups, entry);
+  return targets?.nextItem
+    || targets?.previousItem
+    || targets?.nextGroup
+    || targets?.previousGroup
+    || null;
+}
+
 function historyVideoItems() {
   return historyMediaItems("video");
 }
