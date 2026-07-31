@@ -135,3 +135,23 @@ test("history retention is independent per media type and preserves favorites", 
   assert.deepEqual(records.map(record => record.recordId), ["record-4", "record-3", "record-2", "record-1", "record-0"]);
 });
 
+test("history projection can tombstone individual generated results", () => {
+  let state = createHistoryState();
+  state = applyHistoryEvent(state, {
+    type: "record-created",
+    record: {
+      recordId: "record-many",
+      kind: "generation",
+      mediaType: "image",
+      results: ["https://cdn.example/a.png", "https://cdn.example/b.png"],
+      createdAt: 10
+    }
+  });
+  state = applyHistoryEvent(state, {
+    type: "record-results-deleted",
+    recordId: "record-many",
+    results: ["https://cdn.example/a.png"]
+  });
+
+  assert.deepEqual(listHistoryRecords(state)[0].results, ["https://cdn.example/b.png"]);
+});

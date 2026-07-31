@@ -43,3 +43,27 @@ test("reports row lifecycle changes through the browser worker", () => {
   const updateBody = source.slice(updateStart, source.indexOf("\n}\n", updateStart) + 3);
   assert.match(updateBody, /notifyAgentRow\(row\)/);
 });
+
+test("renders and persists history source filtering", () => {
+  assert.match(source, /function renderHistoryOriginFilter\(\)/);
+  assert.match(source, /id="historyOriginFilter"/);
+  assert.match(source, /STORAGE_KEYS\.historyOrigin/);
+  assert.match(source, /HISTORY_ORIGIN_UTILS\.matchesOrigin\(item, state\.historyOrigin\)/);
+  assert.match(source, /HISTORY_ORIGIN_UTILS\.matchesOrigin\(item\.record, state\.historyOrigin\)/);
+});
+
+test("keeps different sources in separate generation groups and labels history cards", () => {
+  const signatureStart = source.indexOf("function generationInputSignature(");
+  const signatureBody = source.slice(signatureStart, source.indexOf("\n}\n", signatureStart) + 3);
+  assert.match(signatureBody, /origin:/);
+  assert.match(source, /function renderHistoryOriginBadge\(/);
+  assert.match(source, /renderHistoryOriginBadge\(record\)/);
+  assert.match(source, /renderHistoryOriginBadge\(item\)/);
+});
+
+test("manual history deletion and favorites emit control events", () => {
+  assert.match(source, /function deleteUploadHistory[\s\S]*?deleteControlHistoryRecord/);
+  assert.match(source, /function deleteGenerationResults[\s\S]*?deleteControlHistoryRecord/);
+  assert.match(source, /function toggleGenerationFavorite[\s\S]*?setControlHistoryFavorite/);
+  assert.match(source, /function toggleGenerationGroupFavorite[\s\S]*?setControlHistoryFavorite/);
+});

@@ -9,6 +9,7 @@ const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
 const PROMPT_DETAIL_UTILS = globalThis.ApiBatchPromptDetailUtils;
+const HISTORY_ORIGIN_UTILS = globalThis.ApiBatchHistoryOriginUtils;
 const AGENT_TASK_ADAPTER = globalThis.ApiBatchAgentTaskAdapter;
 const AGENT_RUNTIME = globalThis.ApiBatchAgentRuntime;
 const { insertPromptToken } = PROMPT_DETAIL_UTILS;
@@ -32,6 +33,8 @@ const STORAGE_KEYS = {
   historyModel: "api_console_history_model",
   historySize: "api_console_history_size",
   historySearch: "api_console_history_search",
+  historyOrigin: "api_console_history_origin",
+  historyJournalMigration: "api_console_history_journal_migration_v1",
   maxConcurrency: "api_console_max_concurrency",
   runningHubMotionConfig: "api_console_runninghub_motion_config_v1",
   imageRows: "api_console_image_rows_v2",
@@ -1063,6 +1066,7 @@ const state = {
   historyModel: localStorage.getItem(STORAGE_KEYS.historyModel) || "all",
   historySize: localStorage.getItem(STORAGE_KEYS.historySize) || "all",
   historySearch: localStorage.getItem(STORAGE_KEYS.historySearch) || "",
+  historyOrigin: localStorage.getItem(STORAGE_KEYS.historyOrigin) || "all",
   historyFavoritesOnly: localStorage.getItem(STORAGE_KEYS.historyFavoritesOnly) === "1",
   historyPage: 1,
   historyOpenGenerationGroup: "",
@@ -1264,6 +1268,9 @@ function saveJson(key, value) {
 
 let historyDbPromise = null;
 let localHistoryBackupTimer = 0;
+let controlHistoryAppendTimer = 0;
+let controlSessionReadyPromise = null;
+const pendingControlHistoryRecords = new Map();
 
 function openHistoryDb() {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -1352,22 +1359,171 @@ function scheduleLocalHistoryBackup() {
   }, 700);
 }
 
-function mergeUploadHistoryLists(...lists) {
-  const map = new Map();
-  normalizeAssets(lists.flat()).forEach(item => {
-    if (!item || !item.url) return;
-    const existing = map.get(item.url);
-    if (!existing || Number(item.createdAt || 0) >= Number(existing.createdAt || 0)) {
-      map.set(item.url, item);
-    }
+function currentBrowserOrigin() {
+  return HISTORY_ORIGIN_UTILS.browserOrigin(state.agentBrowserId, state.agentBrowserLabel);
+}
+
+function normalizeHistoryOrigin(value, fallback = HISTORY_ORIGIN_UTILS.legacyOrigin()) {
+  return HISTORY_ORIGIN_UTILS.normalizeOrigin(value, fallback);
+}
+
+async function ensureControlSession() {
+  if (location.protocol === "file:") return false;
+  if (!controlSessionReadyPromise) {
+    controlSessionReadyPromise = fetch("/api/control/v1/session", {
+      credentials: "same-origin",
+      cache: "no-store"
+    }).then(response => {
+      if (!response.ok) throw new Error(`Control session HTTP ${response.status}`);
+      return true;
+    }).catch(error => {
+      controlSessionReadyPromise = null;
+      console.warn("Control history session unavailable", error);
+      return false;
+    });
+  }
+  return controlSessionReadyPromise;
+}
+
+async function controlHistoryRequest(path, options = {}) {
+  if (!(await ensureControlSession())) return null;
+  const headers = { ...(options.headers || {}) };
+  let body = options.body;
+  if (body && typeof body !== "string") {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(body);
+  }
+  const response = await fetch(`/api/control/v1${path}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    ...options,
+    headers,
+    body
   });
-  return Array.from(map.values()).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Control history HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  return text ? JSON.parse(text) : {};
+}
+
+async function readControlHistoryRecords() {
+  if (location.protocol === "file:") return { available: false, records: [] };
+  try {
+    const json = await controlHistoryRequest("/history");
+    return {
+      available: Boolean(json),
+      records: Array.isArray(json?.records) ? json.records : []
+    };
+  } catch (error) {
+    console.warn("Control history read failed", error);
+    return { available: false, records: [] };
+  }
+}
+
+function historyMediaType(record, kind) {
+  if (kind === "upload") return HISTORY_TYPES.includes(record?.type) ? record.type : guessType(record?.url || "");
+  const firstResult = Array.isArray(record?.results) ? record.results.find(Boolean) : record?.url;
+  const url = typeof firstResult === "string" ? firstResult : firstResult?.url || "";
+  const type = guessType(url);
+  return HISTORY_TYPES.includes(type) ? type : "other";
+}
+
+function toControlHistoryRecord(record, kind) {
+  return HISTORY_ORIGIN_UTILS.toControlRecord(record, {
+    kind,
+    mediaType: historyMediaType(record, kind),
+    fallbackOrigin: currentBrowserOrigin()
+  });
+}
+
+async function appendControlHistoryRecords(records) {
+  const normalized = (Array.isArray(records) ? records : [records])
+    .map(item => item?.kind ? toControlHistoryRecord(item, item.kind) : null)
+    .filter(Boolean);
+  if (!normalized.length) return;
+  const json = await controlHistoryRequest("/history/records", {
+    method: "POST",
+    body: { records: normalized }
+  });
+  return Array.isArray(json?.records) ? json.records : [];
+}
+
+function scheduleControlHistoryAppend(records) {
+  (Array.isArray(records) ? records : [records]).filter(Boolean).forEach(record => {
+    const normalized = record?.kind ? toControlHistoryRecord(record, record.kind) : null;
+    if (normalized?.recordId) pendingControlHistoryRecords.set(normalized.recordId, normalized);
+  });
+  if (!pendingControlHistoryRecords.size) return;
+  clearTimeout(controlHistoryAppendTimer);
+  controlHistoryAppendTimer = window.setTimeout(async () => {
+    const batch = Array.from(pendingControlHistoryRecords.values());
+    batch.forEach(record => pendingControlHistoryRecords.delete(record.recordId));
+    try {
+      await appendControlHistoryRecords(batch);
+    } catch (error) {
+      batch.forEach(record => pendingControlHistoryRecords.set(record.recordId, record));
+      console.warn("Control history append failed", error);
+    }
+  }, 300);
+}
+
+async function migrateHistoryToControlJournal() {
+  if (location.protocol === "file:" || localStorage.getItem(STORAGE_KEYS.historyJournalMigration) === "1") return;
+  const migrationRecords = [
+    ...state.uploadHistory.map(record => ({ ...record, kind: "upload" })),
+    ...state.generationHistory.map(record => ({ ...record, kind: "generation" }))
+  ];
+  if (!migrationRecords.length) return;
+  await appendControlHistoryRecords(migrationRecords);
+  localStorage.setItem(STORAGE_KEYS.historyJournalMigration, "1");
+}
+
+async function setControlHistoryFavorite(recordId, favorite) {
+  if (!recordId || location.protocol === "file:") return;
+  try {
+    await controlHistoryRequest(`/history/${encodeURIComponent(recordId)}/favorite`, {
+      method: "POST",
+      body: { favorite: Boolean(favorite) }
+    });
+  } catch (error) {
+    console.warn("Control history favorite update failed", error);
+  }
+}
+
+async function deleteControlHistoryRecord(recordId) {
+  if (!recordId || location.protocol === "file:") return;
+  try {
+    await controlHistoryRequest(`/history/${encodeURIComponent(recordId)}`, { method: "DELETE" });
+  } catch (error) {
+    console.warn("Control history delete failed", error);
+  }
+}
+
+async function deleteControlHistoryResults(recordId, results) {
+  const normalized = (Array.isArray(results) ? results : [results]).filter(Boolean);
+  if (!recordId || !normalized.length || location.protocol === "file:") return;
+  try {
+    await controlHistoryRequest(`/history/${encodeURIComponent(recordId)}/results/delete`, {
+      method: "POST",
+      body: { results: normalized }
+    });
+  } catch (error) {
+    console.warn("Control history result delete failed", error);
+  }
+}
+function mergeUploadHistoryLists(...lists) {
+  return HISTORY_ORIGIN_UTILS.firstWriterMerge(
+    lists.map(list => normalizeAssets(list)),
+    item => item.id || item.url
+  );
 }
 
 function mergeGenerationHistoryLists(...lists) {
-  const map = new Map();
-  normalizeGenerations(lists.flat()).forEach(record => {
-    const key = record.id || [
+  return HISTORY_ORIGIN_UTILS.firstWriterMerge(
+    lists.map(list => normalizeGenerations(list)),
+    record => record.id || [
       record.taskId,
       record.page,
       record.model,
@@ -1377,13 +1533,8 @@ function mergeGenerationHistoryLists(...lists) {
       record.duration,
       record.prompt,
       JSON.stringify(record.results || [])
-    ].join("|");
-    const existing = map.get(key);
-    if (!existing || Number(record.createdAt || 0) >= Number(existing.createdAt || 0)) {
-      map.set(key, record);
-    }
-  });
-  return Array.from(map.values()).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    ].join("|")
+  );
 }
 
 function loadHistoryRecoveryCandidates(kind) {
@@ -1453,44 +1604,60 @@ function pruneGenerationHistory(records) {
 function persistUploadHistory() {
   state.uploadHistory = pruneUploadHistory(state.uploadHistory);
   writeHistoryDb(HISTORY_IDB_KEYS.uploadHistory, state.uploadHistory);
-  scheduleLocalHistoryBackup();
 }
 
 function persistGenerationHistory() {
   state.generationHistory = pruneGenerationHistory(state.generationHistory);
   writeHistoryDb(HISTORY_IDB_KEYS.generationHistory, state.generationHistory);
-  scheduleLocalHistoryBackup();
 }
 
 async function initializeHistoryStorage() {
-  const [storedUploads, storedGenerations, localBackup] = await Promise.all([
+  const [storedUploads, storedGenerations, localBackup, controlHistory] = await Promise.all([
     readHistoryDb(HISTORY_IDB_KEYS.uploadHistory, null),
     readHistoryDb(HISTORY_IDB_KEYS.generationHistory, null),
-    readLocalHistoryBackup()
+    readLocalHistoryBackup(),
+    readControlHistoryRecords()
   ]);
   const legacyUploads = loadJson(STORAGE_KEYS.uploadHistory, []);
   const legacyGenerations = loadJson(STORAGE_KEYS.generationHistory, []);
   const backupUploads = Array.isArray(localBackup.uploadHistory) ? localBackup.uploadHistory : [];
   const backupGenerations = Array.isArray(localBackup.generationHistory) ? localBackup.generationHistory : [];
-  const hasUploadSource = (Array.isArray(storedUploads) && storedUploads.length > 0) || legacyUploads.length > 0 || backupUploads.length > 0;
-  const hasGenerationSource = (Array.isArray(storedGenerations) && storedGenerations.length > 0) || legacyGenerations.length > 0 || backupGenerations.length > 0;
+  const controlRecords = (Array.isArray(controlHistory.records) ? controlHistory.records : [])
+    .map(HISTORY_ORIGIN_UTILS.fromControlRecord)
+    .filter(Boolean);
+  const controlUploads = controlRecords.filter(record => record.kind === "upload");
+  const controlGenerations = controlRecords.filter(record => record.kind === "generation");
+  const hasUploadSource = controlUploads.length > 0 || (Array.isArray(storedUploads) && storedUploads.length > 0) || legacyUploads.length > 0 || backupUploads.length > 0;
+  const hasGenerationSource = controlGenerations.length > 0 || (Array.isArray(storedGenerations) && storedGenerations.length > 0) || legacyGenerations.length > 0 || backupGenerations.length > 0;
   const uploadSource = mergeUploadHistoryLists(
+    controlUploads,
     Array.isArray(storedUploads) ? storedUploads : [],
     legacyUploads,
     backupUploads
   );
   const generationSource = mergeGenerationHistoryLists(
+    controlGenerations,
     Array.isArray(storedGenerations) ? storedGenerations : [],
     legacyGenerations,
     backupGenerations
   );
   state.uploadHistory = pruneUploadHistory(uploadSource);
   state.generationHistory = pruneGenerationHistory(generationSource);
+  controlGenerations.filter(record => record.favorite).forEach(record => {
+    (record.results || []).forEach((_, index) => state.generationFavorites.add(generationResultKey(record.id, index)));
+  });
+  saveJson(STORAGE_KEYS.generationFavorites, Array.from(state.generationFavorites));
   const writes = [];
   if (hasUploadSource || state.uploadHistory.length > 0) writes.push(writeHistoryDb(HISTORY_IDB_KEYS.uploadHistory, state.uploadHistory));
   if (hasGenerationSource || state.generationHistory.length > 0) writes.push(writeHistoryDb(HISTORY_IDB_KEYS.generationHistory, state.generationHistory));
   await Promise.all(writes);
-  if (state.uploadHistory.length || state.generationHistory.length) scheduleLocalHistoryBackup();
+  if (controlHistory.available) {
+    try {
+      await migrateHistoryToControlJournal();
+    } catch (error) {
+      console.warn("Control history migration failed", error);
+    }
+  }
 }
 
 async function recoverHistoryFromBrowserStorage() {
@@ -1711,21 +1878,16 @@ function normalizeAssets(value) {
     const url = assetUrl(item);
     if (!url) return null;
     return {
-    id: item.id || uid("asset"),
-    name: item.name || shortUrl(url),
-    url,
-    preview: assetUrl({ url: item.preview }) || url,
-    type: item.type || guessType(url),
-    width: item.width,
-    height: item.height,
-    duration: item.duration,
-    size: item.size,
-    compressedFrom: item.compressedFrom,
-    source: item.source,
-    agentAssetId: item.agentAssetId || item.assetId,
-    origin: item.origin ? { ...item.origin } : null,
-    executedBy: item.executedBy ? { ...item.executedBy } : null,
-    createdAt: item.createdAt || Date.now()
+      ...item,
+      id: item.id || uid("asset"),
+      name: item.name || shortUrl(url),
+      url,
+      preview: assetUrl({ url: item.preview }) || url,
+      type: item.type || guessType(url),
+      agentAssetId: item.agentAssetId || item.assetId || "",
+      origin: normalizeHistoryOrigin(item.origin),
+      executedBy: item.executedBy ? normalizeHistoryOrigin(item.executedBy) : null,
+      createdAt: item.createdAt || Date.now()
     };
   }).filter(Boolean);
 }
@@ -1761,10 +1923,12 @@ function uploadResponseUrl(json) {
 function normalizeGenerations(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => ({
+    ...item,
     id: item.id || uid("gen"),
     createdAt: item.createdAt || Date.now(),
     page: item.page || "",
     taskId: item.taskId || "",
+    agentTaskId: item.agentTaskId || "",
     prompt: item.prompt || "",
     model: item.model || "",
     version: item.version || "",
@@ -1777,8 +1941,12 @@ function normalizeGenerations(value) {
     voiceId: item.voiceId || "",
     images: normalizeAssets(item.images),
     refs: normalizeAssets(item.refs),
+    firstFrame: normalizeAssets(item.firstFrame ? [item.firstFrame] : [])[0] || null,
+    lastFrame: normalizeAssets(item.lastFrame ? [item.lastFrame] : [])[0] || null,
     params: item.params || {},
-    results: Array.isArray(item.results) ? item.results : item.url ? [item.url] : []
+    results: Array.isArray(item.results) ? item.results : item.url ? [item.url] : [],
+    origin: normalizeHistoryOrigin(item.origin),
+    executedBy: item.executedBy ? normalizeHistoryOrigin(item.executedBy) : null
   }));
 }
 
@@ -8432,13 +8600,20 @@ function compressVideoFileForSeedance(file, target) {
 }
 
 function addUploadHistory(asset) {
-  const normalized = normalizeAssets([asset])[0];
+  const browserOrigin = currentBrowserOrigin();
+  const normalized = normalizeAssets([{
+    ...asset,
+    origin: asset?.origin ? normalizeHistoryOrigin(asset.origin) : browserOrigin,
+    executedBy: asset?.executedBy ? normalizeHistoryOrigin(asset.executedBy) : browserOrigin
+  }])[0];
   if (!normalized) return;
-  const withoutDuplicate = state.uploadHistory.filter(item => item.url !== normalized.url);
+  const historyKey = `${HISTORY_ORIGIN_UTILS.originKey(normalized.origin)}::${normalized.url}`;
+  const withoutDuplicate = state.uploadHistory.filter(item => `${HISTORY_ORIGIN_UTILS.originKey(item.origin)}::${item.url}` !== historyKey);
   const sameType = [normalized, ...withoutDuplicate.filter(item => item.type === normalized.type)].slice(0, HISTORY_RETENTION_PER_TYPE);
   const otherTypes = withoutDuplicate.filter(item => item.type !== normalized.type);
   state.uploadHistory = [...sameType, ...otherTypes].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   persistUploadHistory();
+  scheduleControlHistoryAppend([{ ...normalized, kind: "upload" }]);
 }
 
 function openAssetDialog(rowId, filter) {
@@ -8974,18 +9149,21 @@ function appendRowResult(row, data, payload, taskId) {
 }
 
 function addGenerationHistory(record) {
-  const normalized = {
+  const browserOrigin = currentBrowserOrigin();
+  const normalized = normalizeGenerations([{
     ...record,
-    origin: record?.origin ? { ...record.origin } : null,
-    executedBy: record?.executedBy ? { ...record.executedBy } : null
-  };
-  const taskId = String(normalized?.taskId || "");
-  const page = String(normalized?.page || "");
+    origin: record?.origin ? normalizeHistoryOrigin(record.origin) : browserOrigin,
+    executedBy: record?.executedBy ? normalizeHistoryOrigin(record.executedBy) : browserOrigin
+  }])[0];
+  if (!normalized) return;
+  const taskId = String(normalized.taskId || "");
+  const page = String(normalized.page || "");
   const history = taskId
     ? state.generationHistory.filter(item => String(item?.taskId || "") !== taskId || String(item?.page || "") !== page)
     : state.generationHistory;
   state.generationHistory = [normalized, ...history];
   persistGenerationHistory();
+  scheduleControlHistoryAppend([{ ...normalized, kind: "generation" }]);
   if (normalized.agentTaskId) {
     const located = findAgentRow(normalized.agentTaskId);
     if (located) {
@@ -10123,16 +10301,11 @@ function renderHistoryPage() {
   document.querySelector("#recoverHistoryStorage").addEventListener("click", () => recoverHistoryFromBrowserStorage());
   document.querySelector("#importLegacy4173History").addEventListener("click", () => importHistoryFromLegacyPort());
   document.querySelector("#clearUploadHistory").addEventListener("click", () => {
-    state.uploadHistory = [];
-    state.selectedUploadIds.clear();
-    persistUploadHistory();
-    render();
+    deleteUploadHistory(state.uploadHistory.map(record => record.id));
   });
   document.querySelector("#clearGenHistory").addEventListener("click", () => {
-    state.generationHistory = [];
-    state.selectedGenerationIds.clear();
-    persistGenerationHistory();
-    render();
+    const keys = generationResultItems().map(item => item.key);
+    deleteGenerationResults(keys);
   });
   document.querySelectorAll("[data-history-tab]").forEach(button => {
     button.addEventListener("click", event => {
@@ -10198,11 +10371,13 @@ function renderHistoryActions() {
   const total = isUploads ? filteredUploadRecords().length : filteredGenerationInputGroups().length;
   const selectedCount = isUploads ? selectedUploadRecords().length : selectedGenerationInputGroups().length;
   const selectedImageCount = !isUploads && state.historyType === "image" ? selectedGenerationResultItems().filter(item => item.type === "image").length : 0;
+  const originFilter = renderHistoryOriginFilter();
   const modelFilter = isUploads ? "" : renderHistoryModelFilter();
   const sizeFilter = isUploads ? "" : renderHistorySizeFilter();
   const searchFilter = isUploads ? "" : renderHistorySearchFilter();
   const favoriteCount = isUploads ? 0 : generationResultItems().filter(item => item.type === state.historyType && state.generationFavorites.has(item.key)).length;
   return `
+    ${originFilter}
     ${modelFilter}
     ${sizeFilter}
     ${searchFilter}
@@ -10214,6 +10389,49 @@ function renderHistoryActions() {
     <button id="downloadSelectedHistory" class="button" type="button" ${selectedCount ? "" : "disabled"}>${isUploads ? "下载选中文件" : "下载选中结果"}</button>
     <button id="deleteSelectedHistory" class="button danger" type="button" ${selectedCount ? "" : "disabled"}>删除选中</button>
   `;
+}
+
+function historyOriginOptions() {
+  const records = state.historyTab === "uploads"
+    ? state.uploadHistory.filter(item => item.type === state.historyType)
+    : generationResultItems().filter(item => item.type === state.historyType).map(item => item.record);
+  const options = new Map();
+  records.filter(Boolean).forEach(record => {
+    const origin = normalizeHistoryOrigin(record.origin);
+    const key = HISTORY_ORIGIN_UTILS.originKey(origin);
+    if (!options.has(key)) {
+      const category = origin.type === "agent" ? "Agent" : "浏览器";
+      options.set(key, `${HISTORY_ORIGIN_UTILS.originLabel(origin)} · ${category}`);
+    }
+  });
+  return Array.from(options.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "zh-Hans-CN"));
+}
+
+function renderHistoryOriginFilter() {
+  const options = historyOriginOptions();
+  if (state.historyOrigin !== "all" && !options.some(item => item.value === state.historyOrigin)) {
+    state.historyOrigin = "all";
+    localStorage.setItem(STORAGE_KEYS.historyOrigin, state.historyOrigin);
+  }
+  return `
+    <label class="history-model-filter history-origin-filter">
+      <span>来源</span>
+      <select id="historyOriginFilter">
+        <option value="all">全部来源</option>
+        ${options.map(item => `<option value="${escapeAttr(item.value)}" ${state.historyOrigin === item.value ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderHistoryOriginBadge(record) {
+  const origin = normalizeHistoryOrigin(record?.origin);
+  const sourceKind = origin.type === "agent" ? "Agent" : "浏览器";
+  const executedBy = record?.executedBy ? normalizeHistoryOrigin(record.executedBy) : null;
+  const title = executedBy ? `由 ${HISTORY_ORIGIN_UTILS.originLabel(executedBy)} 执行` : "";
+  return `<span class="history-origin-badge" title="${escapeAttr(title)}">来源：${escapeHtml(HISTORY_ORIGIN_UTILS.originLabel(origin))} · ${sourceKind}</span>`;
 }
 
 function renderHistoryModelFilter() {
@@ -10297,6 +10515,15 @@ function bindHistoryPage() {
       state.historyPage = page;
       render();
     });
+  });
+  document.querySelector("#historyOriginFilter")?.addEventListener("change", event => {
+    state.historyOrigin = event.target.value || "all";
+    state.historyPage = 1;
+    state.historyOpenGenerationGroup = "";
+    state.selectedUploadIds.clear();
+    state.selectedGenerationIds.clear();
+    localStorage.setItem(STORAGE_KEYS.historyOrigin, state.historyOrigin);
+    render();
   });
   document.querySelector("#historyModelFilter")?.addEventListener("change", event => {
     state.historyModel = event.target.value || "all";
@@ -10604,9 +10831,11 @@ function deleteSelectedHistory() {
 
 function deleteUploadHistory(ids, options = {}) {
   const idSet = new Set(ids);
+  const removed = state.uploadHistory.filter(item => idSet.has(item.id));
   state.uploadHistory = state.uploadHistory.filter(item => !idSet.has(item.id));
   ids.forEach(id => state.selectedUploadIds.delete(id));
   persistUploadHistory();
+  removed.forEach(record => deleteControlHistoryRecord(record.id));
   if (options.render !== false) render();
 }
 
@@ -10620,7 +10849,13 @@ function deleteGenerationResults(keys, options = {}) {
     const record = state.generationHistory.find(item => item.id === recordId);
     if (!record) return;
     const removeIndexes = new Set(indexes);
+    const removedResults = record.results.filter((_, index) => removeIndexes.has(index));
     record.results = record.results.filter((_, index) => !removeIndexes.has(index));
+    if (record.results.length) {
+      deleteControlHistoryResults(record.id, removedResults);
+    } else {
+      deleteControlHistoryRecord(record.id);
+    }
   });
   state.generationHistory = state.generationHistory.filter(record => (record.results || []).length > 0);
   keys.forEach(key => state.selectedGenerationIds.delete(key));
@@ -11084,12 +11319,13 @@ function visibleGenerationResultItems() {
 }
 
 function filteredUploadRecords() {
-  return state.uploadHistory.filter(item => item.type === state.historyType);
+  return state.uploadHistory.filter(item => item.type === state.historyType && HISTORY_ORIGIN_UTILS.matchesOrigin(item, state.historyOrigin));
 }
 
 function filteredGenerationResultItems() {
   return generationResultItems().filter(item => {
     if (item.type !== state.historyType) return false;
+    if (!HISTORY_ORIGIN_UTILS.matchesOrigin(item.record, state.historyOrigin)) return false;
     if (state.historyFavoritesOnly && !state.generationFavorites.has(item.key)) return false;
     if (state.historyModel && state.historyModel !== "all" && generationModelKey(item.record) !== state.historyModel) return false;
     if (state.historySize && state.historySize !== "all" && generationSizeKey(item.record) !== state.historySize) return false;
@@ -11149,6 +11385,7 @@ function generationInputSignature(record) {
     count: record?.count || "",
     voiceId: record?.voiceId || "",
     offPeak: Boolean(record?.offPeak),
+    origin: HISTORY_ORIGIN_UTILS.originKey(record?.origin),
     assets,
     firstFrame: assetSignature(record?.firstFrame),
     lastFrame: assetSignature(record?.lastFrame)
@@ -11190,6 +11427,12 @@ function toggleGenerationFavorite(key) {
   } else {
     state.generationFavorites.add(key);
   }
+  const parsed = parseGenerationKey(key);
+  const record = parsed ? state.generationHistory.find(item => item.id === parsed.recordId) : null;
+  if (record) {
+    const favorite = (record.results || []).some((_, index) => state.generationFavorites.has(generationResultKey(record.id, index)));
+    setControlHistoryFavorite(record.id, favorite);
+  }
   saveJson(STORAGE_KEYS.generationFavorites, Array.from(state.generationFavorites));
   render();
 }
@@ -11204,6 +11447,12 @@ function toggleGenerationGroupFavorite(id) {
     } else {
       state.generationFavorites.delete(item.key);
     }
+  });
+  const recordIds = new Set(group.items.map(item => item.record?.id).filter(Boolean));
+  recordIds.forEach(recordId => {
+    const record = state.generationHistory.find(item => item.id === recordId);
+    const favorite = (record?.results || []).some((_, index) => state.generationFavorites.has(generationResultKey(recordId, index)));
+    setControlHistoryFavorite(recordId, favorite);
   });
   saveJson(STORAGE_KEYS.generationFavorites, Array.from(state.generationFavorites));
   render();
@@ -11333,6 +11582,7 @@ function renderGenerationInputGroupCard(group) {
       ${renderHistoryPreview({ ...item, name: filename })}
       <button class="tiny-button history-group-toggle" data-open-generation-group="${escapeAttr(group.id)}" type="button">${isOpen ? "收起结果" : `查看全部 ${group.items.length} 个结果`}</button>
       ${renderGenerationPromptSummary(item)}
+      ${renderHistoryOriginBadge(record)}
       <span class="meta-line">${escapeHtml(record.model || "未知模型")} · ${escapeHtml(record.version || "未知版本")} · 尺寸 ${record.size || "空"} · 清晰度 ${record.quality || "空"}</span>
       <span class="meta-line">${typeLabel(item.type)} · ${new Date(record.createdAt).toLocaleString()} · 共 ${group.items.length} 个结果</span>
       <div class="history-card-actions">
@@ -11379,6 +11629,7 @@ function renderUploadHistoryCard(item) {
         <button class="tiny-button danger" data-delete-upload="${escapeAttr(item.id)}" type="button">删除</button>
       </div>
       ${renderHistoryPreview(item)}
+      ${renderHistoryOriginBadge(item)}
       <span class="meta-line">${assetMeta(item)}</span>
       <a class="url-line" href="${escapeAttr(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(shortUrl(item.url))}</a>
       <div class="history-card-actions">

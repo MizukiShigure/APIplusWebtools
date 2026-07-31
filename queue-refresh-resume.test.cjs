@@ -133,8 +133,12 @@ const generationState = { generationHistory: [{ page: "image", taskId: "task-1",
 const addGenerationHistory = new Function(
   "state",
   "persistGenerationHistory",
+  "currentBrowserOrigin",
+  "normalizeHistoryOrigin",
+  "normalizeGenerations",
+  "scheduleControlHistoryAppend",
   `${functionDeclaration("addGenerationHistory")}\nreturn addGenerationHistory;`
-)(generationState, () => {});
+)(generationState, () => {}, () => ({ type: "browser", client: "web", id: "test", label: "Test" }), value => value, values => values, () => {});
 addGenerationHistory({ page: "image", taskId: "task-1", id: "new" });
 assert.deepEqual(generationState.generationHistory.map(item => item.id), ["new"], "a resumed task must replace its old history record");
 

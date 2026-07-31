@@ -260,3 +260,32 @@ test("stages multipart assets without exposing a permanent public file URL", asy
   assert.equal(fs.existsSync(path.join(fixture.dataDir, "staging", uploaded.json.asset.assetId)), true);
 });
 
+test("browser control can delete one generated result without deleting the record", async t => {
+  const fixture = await createFixture(t);
+  const cookie = await controlSession(fixture.baseUrl);
+  const record = {
+    recordId: "generation-many",
+    kind: "generation",
+    mediaType: "image",
+    results: ["https://cdn.example/a.png", "https://cdn.example/b.png"],
+    createdAt: 100
+  };
+  const created = await jsonRequest(`${fixture.baseUrl}/api/control/v1/history/records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ records: [record] })
+  });
+  assert.equal(created.response.status, 200);
+
+  const deleted = await jsonRequest(`${fixture.baseUrl}/api/control/v1/history/generation-many/results/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ results: [record.results[0]] })
+  });
+  assert.equal(deleted.response.status, 200);
+
+  const history = await jsonRequest(`${fixture.baseUrl}/api/control/v1/history`, {
+    headers: { Cookie: cookie }
+  });
+  assert.deepEqual(history.json.records[0].results, [record.results[1]]);
+});

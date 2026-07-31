@@ -146,7 +146,8 @@ function createHistoryState() {
     recordsById: {},
     recordOrder: [],
     favoritesById: {},
-    deletedById: {}
+    deletedById: {},
+    deletedResultsById: {}
   };
 }
 
@@ -156,6 +157,7 @@ function applyHistoryEvent(currentState, event) {
   state.recordOrder ||= [];
   state.favoritesById ||= {};
   state.deletedById ||= {};
+  state.deletedResultsById ||= {};
   if (event?.type === "record-created") {
     const record = event.record && typeof event.record === "object" ? clone(event.record) : null;
     const recordId = String(record?.recordId || "");
@@ -166,6 +168,14 @@ function applyHistoryEvent(currentState, event) {
   } else if (event?.type === "favorite-set") {
     const recordId = String(event.recordId || "");
     if (recordId && state.recordsById[recordId]) state.favoritesById[recordId] = Boolean(event.favorite);
+  } else if (event?.type === "record-results-deleted") {
+    const recordId = String(event.recordId || "");
+    if (recordId && state.recordsById[recordId]) {
+      state.deletedResultsById[recordId] ||= {};
+      (Array.isArray(event.results) ? event.results : []).forEach(result => {
+        state.deletedResultsById[recordId][JSON.stringify(result)] = true;
+      });
+    }
   } else if (event?.type === "record-deleted") {
     const recordId = String(event.recordId || "");
     if (recordId && state.recordsById[recordId]) state.deletedById[recordId] = true;
@@ -184,7 +194,15 @@ function listHistoryRecords(currentState, options = {}) {
   const records = (state.recordOrder || [])
     .map(recordId => state.recordsById?.[recordId])
     .filter(record => record && !state.deletedById?.[record.recordId])
-    .map(record => ({ ...clone(record), favorite: Boolean(state.favoritesById?.[record.recordId]) }))
+    .map(record => {
+      const projected = clone(record);
+      const deletedResults = state.deletedResultsById?.[record.recordId] || {};
+      if (Array.isArray(projected.results)) {
+        projected.results = projected.results.filter(result => !deletedResults[JSON.stringify(result)]);
+      }
+      return { ...projected, favorite: Boolean(state.favoritesById?.[record.recordId]) };
+    })
+    .filter(record => record.kind !== "generation" || !Array.isArray(record.results) || record.results.length > 0)
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   return records.filter(record => {
     if (record.favorite) return true;

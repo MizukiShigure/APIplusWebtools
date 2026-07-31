@@ -1426,6 +1426,16 @@ input:disabled {
   max-width: 180px;
 }
 
+.history-origin-filter select {
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.history-origin-badge {
+  color: #35645b;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .history-search-filter {
   align-items: center;
   display: inline-flex;

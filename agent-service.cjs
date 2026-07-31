@@ -628,6 +628,24 @@ async function createAgentService(options = {}) {
       sendJson(response, 200, { success: true, records: appended });
       return true;
     }
+    const resultDeleteMatch = pathname.match(/^\/api\/control\/v1\/history\/([^/]+)\/results\/delete$/);
+    if (request.method === "POST" && resultDeleteMatch) {
+      const body = await readJsonBody(request);
+      const recordId = decodeURIComponent(resultDeleteMatch[1]);
+      const results = Array.isArray(body.results) ? body.results.filter(Boolean) : [];
+      if (!results.length) {
+        sendJson(response, 400, { success: false, error: "results_required" });
+        return true;
+      }
+      await historyStore.append({
+        eventId: `delete-results:${recordId}:${crypto.randomUUID()}`,
+        type: "record-results-deleted",
+        recordId,
+        results
+      });
+      sendJson(response, 200, { success: true });
+      return true;
+    }
     const favoriteMatch = pathname.match(/^\/api\/control\/v1\/history\/([^/]+)\/favorite$/);
     if (request.method === "POST" && favoriteMatch) {
       const body = await readJsonBody(request);
