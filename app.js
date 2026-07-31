@@ -9,6 +9,8 @@ const VIDEO_COMPRESS_FPS = 24;
 const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
 const PROMPT_DETAIL_UTILS = globalThis.ApiBatchPromptDetailUtils;
+const AGENT_TASK_ADAPTER = globalThis.ApiBatchAgentTaskAdapter;
+const AGENT_RUNTIME = globalThis.ApiBatchAgentRuntime;
 const { insertPromptToken } = PROMPT_DETAIL_UTILS;
 const PROMPT_DETAIL_SAVE_DELAY_MS = 180;
 const PROMPT_DETAIL_TOKEN_MIME = "application/x-api-prompt-token";
@@ -57,7 +59,9 @@ const STORAGE_KEYS = {
   uploadHistory: "api_console_upload_history_v2",
   generationHistory: "api_console_generation_history_v2",
   generationFavorites: "api_console_generation_favorites_v1",
-  historyFavoritesOnly: "api_console_history_favorites_only"
+  historyFavoritesOnly: "api_console_history_favorites_only",
+  agentBrowserId: "api_console_agent_browser_id_v1",
+  agentBrowserLabel: "api_console_agent_browser_label_v1"
 };
 
 const HISTORY_TYPES = ["image", "video", "audio", "other"];
@@ -1033,6 +1037,9 @@ const state = {
   uploadHistory: [],
   generationHistory: [],
   generationFavorites: new Set(loadJson(STORAGE_KEYS.generationFavorites, [])),
+  agentBrowserId: localStorage.getItem(STORAGE_KEYS.agentBrowserId) || uid("browser"),
+  agentBrowserLabel: localStorage.getItem(STORAGE_KEYS.agentBrowserLabel) || "本机浏览器",
+  agentWorkerStatus: { connection: "offline", active: false, lastError: "" },
   queue: [],
   running: 0,
   imageVideoQueue: [],
@@ -1076,6 +1083,12 @@ const state = {
   runningHubMotionConfigWorkflowType: "motion",
   runningHubMotionConfigMessage: ""
 };
+
+localStorage.setItem(STORAGE_KEYS.agentBrowserId, state.agentBrowserId);
+localStorage.setItem(STORAGE_KEYS.agentBrowserLabel, state.agentBrowserLabel);
+let agentWorker = null;
+const agentTaskControls = new Map();
+const agentReportSignatures = new Map();
 
 const app = document.querySelector("#app");
 app.addEventListener("click", event => {
@@ -1709,6 +1722,9 @@ function normalizeAssets(value) {
     size: item.size,
     compressedFrom: item.compressedFrom,
     source: item.source,
+    agentAssetId: item.agentAssetId || item.assetId,
+    origin: item.origin ? { ...item.origin } : null,
+    executedBy: item.executedBy ? { ...item.executedBy } : null,
     createdAt: item.createdAt || Date.now()
     };
   }).filter(Boolean);
@@ -1953,6 +1969,9 @@ function createRow(seed = {}) {
   const config = IMAGE_MODELS[model];
   return {
     id: seed.id || uid("row"),
+    agentTaskId: seed.agentTaskId || "",
+    origin: seed.origin ? { ...seed.origin } : null,
+    executedBy: seed.executedBy ? { ...seed.executedBy } : null,
     selected: seed.selected ?? true,
     status: seed.status || "pending",
     prompt: seed.prompt || "",
@@ -2030,6 +2049,9 @@ function createAvatarRow(seed = {}) {
   const config = AVATAR_MODELS[model] || AVATAR_MODELS.jimeng;
   return {
     id: seed.id || uid("avatarrow"),
+    agentTaskId: seed.agentTaskId || "",
+    origin: seed.origin ? { ...seed.origin } : null,
+    executedBy: seed.executedBy ? { ...seed.executedBy } : null,
     selected: seed.selected ?? true,
     status: seed.status || "pending",
     prompt: seed.prompt || "",
@@ -2090,6 +2112,9 @@ function createMotionRow(seed = {}) {
   const config = MOTION_MODELS[model] || MOTION_MODELS.kling;
   return {
     id: seed.id || uid("motionrow"),
+    agentTaskId: seed.agentTaskId || "",
+    origin: seed.origin ? { ...seed.origin } : null,
+    executedBy: seed.executedBy ? { ...seed.executedBy } : null,
     selected: seed.selected ?? true,
     status: seed.status || "pending",
     prompt: seed.prompt || "",
@@ -2181,6 +2206,9 @@ function createImageVideoRow(seed = {}) {
   const config = IMAGE_VIDEO_MODELS[model] || IMAGE_VIDEO_MODELS.hailuo;
   return {
     id: seed.id || uid("ivrow"),
+    agentTaskId: seed.agentTaskId || "",
+    origin: seed.origin ? { ...seed.origin } : null,
+    executedBy: seed.executedBy ? { ...seed.executedBy } : null,
     selected: seed.selected ?? true,
     status: seed.status || "pending",
     prompt: seed.prompt || "",
@@ -2300,6 +2328,9 @@ function createMultiRow(seed = {}) {
   const config = MULTI_VIDEO_MODELS[model] || MULTI_VIDEO_MODELS.seedance;
   return {
     id: seed.id || uid("mvrow"),
+    agentTaskId: seed.agentTaskId || "",
+    origin: seed.origin ? { ...seed.origin } : null,
+    executedBy: seed.executedBy ? { ...seed.executedBy } : null,
     selected: seed.selected ?? true,
     status: seed.status || "pending",
     prompt: seed.prompt || "",
@@ -8644,6 +8675,8 @@ function rememberRemoteTask(row, task, queryEndpoint = "") {
     ...existing.filter(item => String(item?.taskId || "") !== String(record.taskId)),
     record
   ];
+  notifyAgentRow(row, "submitted");
+  notifyAgentRow(row, "polling");
 }
 
 function remoteTasksForRow(row) {
@@ -8926,6 +8959,9 @@ function appendRowResult(row, data, payload, taskId) {
     createdAt: Date.now(),
     page: "image",
     taskId,
+    agentTaskId: row.agentTaskId || "",
+    origin: row.origin ? { ...row.origin } : null,
+    executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
     model: getModel(row).label,
     version: row.version,
@@ -8938,13 +8974,34 @@ function appendRowResult(row, data, payload, taskId) {
 }
 
 function addGenerationHistory(record) {
-  const taskId = String(record?.taskId || "");
-  const page = String(record?.page || "");
+  const normalized = {
+    ...record,
+    origin: record?.origin ? { ...record.origin } : null,
+    executedBy: record?.executedBy ? { ...record.executedBy } : null
+  };
+  const taskId = String(normalized?.taskId || "");
+  const page = String(normalized?.page || "");
   const history = taskId
     ? state.generationHistory.filter(item => String(item?.taskId || "") !== taskId || String(item?.page || "") !== page)
     : state.generationHistory;
-  state.generationHistory = [record, ...history];
+  state.generationHistory = [normalized, ...history];
   persistGenerationHistory();
+  if (normalized.agentTaskId) {
+    const located = findAgentRow(normalized.agentTaskId);
+    if (located) {
+      const upstreamTaskId = normalized.taskId || "";
+      notifyAgentRow(located.row, "partial", {
+        historyRecords: [{
+          ...normalized,
+          recordId: normalized.id,
+          kind: "generation",
+          mediaType: guessType(normalized.results?.[0] || ""),
+          taskId: normalized.agentTaskId,
+          upstreamTaskId
+        }]
+      });
+    }
+  }
 }
 
 function enqueueImageVideoRows(rowsToSubmit) {
@@ -9054,6 +9111,9 @@ function appendImageVideoRowResult(row, data, payload, taskId) {
     createdAt: Date.now(),
     page: "imageVideo",
     taskId,
+    agentTaskId: row.agentTaskId || "",
+    origin: row.origin ? { ...row.origin } : null,
+    executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
     model: getImageVideoModel(row).label,
     version: row.version,
@@ -9246,6 +9306,9 @@ function appendMotionRowResult(row, data, payload, taskId) {
     createdAt: Date.now(),
     page: "motion",
     taskId,
+    agentTaskId: row.agentTaskId || "",
+    origin: row.origin ? { ...row.origin } : null,
+    executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
     model: getMotionModel(row).label,
     version: row.version,
@@ -9442,6 +9505,9 @@ function appendAvatarRowResult(row, data, payload, taskId) {
     createdAt: Date.now(),
     page: "avatar",
     taskId,
+    agentTaskId: row.agentTaskId || "",
+    origin: row.origin ? { ...row.origin } : null,
+    executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
     model: getAvatarModel(row).label,
     version: row.version,
@@ -9615,6 +9681,9 @@ function appendMultiRowResult(row, data, payload, taskId) {
     createdAt: Date.now(),
     page: "multiVideo",
     taskId,
+    agentTaskId: row.agentTaskId || "",
+    origin: row.origin ? { ...row.origin } : null,
+    executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
     model: getMultiModel(row).label,
     version: row.version,
@@ -9978,6 +10047,7 @@ function refreshRowSubmittedStateDisplay(row) {
 function updateRowStatus(row) {
   if (row.status === "dirty" && !row.queuedJobs && !row.runningJobs && !hasSubmittedArtifacts(row)) {
     clearRowCompletionTime(row);
+    notifyAgentRow(row);
     return;
   }
   if (row.runningJobs > 0 && row.finishedJobs + row.canceledJobs < row.totalJobs) {
@@ -9996,6 +10066,7 @@ function updateRowStatus(row) {
     row.status = "pending";
   }
   syncRowCompletionTime(row);
+  notifyAgentRow(row);
 }
 
 function statusLabel(row) {
@@ -13329,6 +13400,332 @@ function escapeAttr(value) {
   return escapeHtml(value);
 }
 
+function agentCatalogs() {
+  const motion = { ...MOTION_MODELS };
+  const avatar = { ...AVATAR_MODELS };
+  runningHubWorkflowConfigs("motion").forEach(config => {
+    motion[runningHubModelKey(config)] = runningHubModelFromConfig(config, "motion");
+  });
+  runningHubWorkflowConfigs("avatar").forEach(config => {
+    avatar[runningHubModelKey(config)] = runningHubModelFromConfig(config, "avatar");
+  });
+  return {
+    image: IMAGE_MODELS,
+    imageVideo: IMAGE_VIDEO_MODELS,
+    motion,
+    multiVideo: MULTI_VIDEO_MODELS,
+    avatar
+  };
+}
+
+function buildAgentCapabilityManifest() {
+  if (!AGENT_TASK_ADAPTER) throw new Error("Agent task adapter is not loaded");
+  return AGENT_TASK_ADAPTER.buildCapabilityManifest({
+    catalogs: agentCatalogs(),
+    enabledTaskTypes: ["image", "imageVideo", "motion", "multiVideo", "avatar"]
+  });
+}
+
+function agentTaskInput(task) {
+  const input = task?.input && typeof task.input === "object" && !Array.isArray(task.input) ? task.input : {};
+  return { ...task, ...input, assets: input.assets ?? task?.assets ?? {}, options: input.options ?? task?.options ?? {} };
+}
+
+function agentTaskPipeline(taskType) {
+  const type = AGENT_TASK_ADAPTER.normalizeTaskType(taskType);
+  const pipelines = {
+    image: {
+      rows: () => state.rows,
+      create: createRow,
+      persist: persistRows,
+      enqueue: enqueueRows,
+      cancel: cancelQueuedJobs
+    },
+    imageVideo: {
+      rows: () => state.imageVideoRows,
+      create: createImageVideoRow,
+      persist: persistImageVideoRows,
+      enqueue: enqueueImageVideoRows,
+      cancel: cancelImageVideoQueuedJobs
+    },
+    motion: {
+      rows: () => state.motionRows,
+      create: createMotionRow,
+      persist: persistMotionRows,
+      enqueue: enqueueMotionRows,
+      cancel: cancelMotionQueuedJobs
+    },
+    multiVideo: {
+      rows: () => state.multiRows,
+      create: createMultiRow,
+      persist: persistMultiRows,
+      enqueue: enqueueMultiRows,
+      cancel: cancelMultiQueuedJobs
+    },
+    avatar: {
+      rows: () => state.avatarRows,
+      create: createAvatarRow,
+      persist: persistAvatarRows,
+      enqueue: enqueueAvatarRows,
+      cancel: cancelAvatarQueuedJobs
+    }
+  };
+  return pipelines[type] ? { ...pipelines[type], taskType: type } : null;
+}
+
+function findAgentRow(agentTaskId) {
+  const target = String(agentTaskId || "");
+  if (!target) return null;
+  for (const taskType of ["image", "imageVideo", "motion", "multiVideo", "avatar"]) {
+    const pipeline = agentTaskPipeline(taskType);
+    const row = pipeline.rows().find(item => String(item.agentTaskId || "") === target);
+    if (row) return { row, pipeline };
+  }
+  return null;
+}
+
+function hasStagedAgentAsset(value) {
+  if (!value) return false;
+  if (Array.isArray(value)) return value.some(hasStagedAgentAsset);
+  if (typeof value !== "object") return false;
+  if (value.workerUrl || value.assetId && !value.url) return true;
+  return Object.values(value).some(hasStagedAgentAsset);
+}
+
+async function uploadAgentAssetFile(file, task, descriptor = {}, taskType = "") {
+  let uploadFile = file;
+  let meta = await getFileMeta(file);
+  let compressedInfo = null;
+  const input = agentTaskInput(task);
+  const multiModel = taskType === "multiVideo" ? getMultiModel({ model: input.model || "seedance" }) : null;
+  if (meta.type === "video" && multiModel?.prepareSeedanceReferences) {
+    const prepared = await prepareSeedanceReferenceFile(file, meta);
+    uploadFile = prepared.file;
+    meta = prepared.meta;
+    compressedInfo = prepared.compressedInfo;
+  }
+  const form = new FormData();
+  form.append("file", uploadFile, uploadFile.name || descriptor.name || "agent-asset");
+  const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
+  const text = await response.text();
+  let json = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { message: text };
+  }
+  const uploadedUrl = uploadResponseUrl(json);
+  if (!response.ok || !uploadedUrl) throw new Error(json.message || `Agent 素材上传失败: HTTP ${response.status}`);
+  const asset = {
+    id: uid("asset"),
+    agentAssetId: descriptor.assetId || descriptor.id || "",
+    name: uploadFile.name || descriptor.name || "agent-asset",
+    url: uploadedUrl,
+    preview: uploadedUrl,
+    type: meta.type,
+    width: meta.width,
+    height: meta.height,
+    duration: meta.duration,
+    size: uploadFile.size,
+    compressedFrom: compressedInfo,
+    source: "agent",
+    origin: task.origin ? { ...task.origin } : null,
+    executedBy: { type: "browser", id: state.agentBrowserId, label: state.agentBrowserLabel },
+    createdAt: Date.now()
+  };
+  addUploadHistory(asset);
+  return asset;
+}
+
+async function resolveAgentTaskAssets(task, controls) {
+  const taskType = AGENT_TASK_ADAPTER.normalizeTaskType(task.taskType);
+  const source = agentTaskInput(task).assets || {};
+  async function resolve(value) {
+    if (!value) return value;
+    if (Array.isArray(value)) return Promise.all(value.map(resolve));
+    if (typeof value !== "object") return value;
+    if (value.url && !value.workerUrl) return AGENT_TASK_ADAPTER.normalizeAsset(value);
+    if (value.workerUrl || value.assetId) {
+      const file = await controls.fetchAsset(value);
+      const asset = await uploadAgentAssetFile(file, task, value, taskType);
+      await controls.ackAsset(value);
+      return asset;
+    }
+    const entries = await Promise.all(Object.entries(value).map(async ([key, item]) => [key, await resolve(item)]));
+    return Object.fromEntries(entries);
+  }
+  return resolve(source);
+}
+
+function resolveAgentModelKey(taskType, requestedModel) {
+  if (!requestedModel) return "";
+  const catalog = agentCatalogs()[taskType] || {};
+  const raw = String(requestedModel);
+  if (catalog[raw]) return raw;
+  const match = Object.entries(catalog).find(([, config]) => String(config.label || "").toLowerCase() === raw.toLowerCase());
+  if (match) return match[0];
+  throw new Error(`模型 ${raw} 不属于任务类型 ${taskType}`);
+}
+
+async function createRowFromAgentTask(task, controls, resolvedAssets = null) {
+  const existing = findAgentRow(task.taskId);
+  if (existing) return { ...existing, created: false };
+  const taskType = AGENT_TASK_ADAPTER.normalizeTaskType(task.taskType);
+  const pipeline = agentTaskPipeline(taskType);
+  if (!pipeline) throw new Error(`暂不支持 Agent 任务类型: ${task.taskType || "empty"}`);
+  const input = agentTaskInput(task);
+  const model = resolveAgentModelKey(taskType, input.model);
+  const normalizedTask = {
+    ...task,
+    input: {
+      ...(task.input || {}),
+      ...input,
+      ...(model ? { model } : {}),
+      assets: resolvedAssets || input.assets || {}
+    }
+  };
+  const mapped = AGENT_TASK_ADAPTER.createRowSeed(normalizedTask, {
+    workerId: state.agentBrowserId,
+    workerLabel: state.agentBrowserLabel,
+    assets: resolvedAssets || input.assets || {}
+  });
+  const row = pipeline.create(mapped.row);
+  pipeline.rows().push(row);
+  pipeline.persist();
+  render();
+  return { row, pipeline, created: true };
+}
+
+function agentReportState(row) {
+  if (row.status === "done") return "completed";
+  if (row.status === "failed") return "failed";
+  if (row.status === "canceled") return "canceled";
+  if (row.status === "partial") return "partial";
+  if (row.status === "queued") return "queued";
+  if (row.status === "running") return row.taskIds?.length ? "polling" : "submitting";
+  return "claimed";
+}
+
+function agentResultRecords(row) {
+  return (Array.isArray(row.results) ? row.results : []).filter(Boolean).map(url => ({
+    url: String(url),
+    type: guessType(String(url))
+  }));
+}
+
+function notifyAgentRow(row, forcedState = "", extra = {}) {
+  if (!row?.agentTaskId) return;
+  const controls = agentTaskControls.get(String(row.agentTaskId));
+  if (!controls) return;
+  const report = {
+    state: forcedState || agentReportState(row),
+    upstreamTaskIds: (Array.isArray(row.taskIds) ? row.taskIds : []).map(String),
+    results: agentResultRecords(row),
+    progress: {
+      total: Number(row.totalJobs || row.count || 1),
+      queued: Number(row.queuedJobs || 0),
+      running: Number(row.runningJobs || 0),
+      finished: Number(row.finishedJobs || 0),
+      canceled: Number(row.canceledJobs || 0),
+      results: Array.isArray(row.results) ? row.results.length : 0
+    },
+    ...(row.error ? { error: { message: String(row.error) } } : {}),
+    ...extra
+  };
+  if (["completed", "failed", "canceled", "submission-unknown"].includes(report.state)) {
+    report.completedAt = new Date(validCompletionTimestamp(row.completedAt) || Date.now()).toISOString();
+  }
+  const signature = JSON.stringify(report);
+  if (agentReportSignatures.get(row.agentTaskId) === signature) return;
+  agentReportSignatures.set(row.agentTaskId, signature);
+  controls.report(report).catch(error => {
+    agentReportSignatures.delete(row.agentTaskId);
+    console.warn("Agent row report failed", row.agentTaskId, error);
+  });
+}
+
+async function executeAgentTask(task, controls) {
+  const taskId = String(task.taskId || "");
+  if (!taskId) throw new Error("Agent task is missing taskId");
+  agentTaskControls.set(taskId, controls);
+  await controls.report({ state: "validating" });
+  let located = findAgentRow(taskId);
+  if (located) {
+    const row = located.row;
+    if (row.status === "pending" && !hasSubmittedArtifacts(row)) {
+      located.pipeline.enqueue([row]);
+      notifyAgentRow(row);
+    } else {
+      notifyAgentRow(row, row.taskIds?.length && !["done", "failed", "canceled"].includes(row.status) ? "polling" : "");
+    }
+    return row;
+  }
+  const rawAssets = agentTaskInput(task).assets || {};
+  if (hasStagedAgentAsset(rawAssets)) await controls.report({ state: "uploading" });
+  const assets = await resolveAgentTaskAssets(task, controls);
+  const uploaded = [];
+  (function collect(value) {
+    if (!value) return;
+    if (Array.isArray(value)) return value.forEach(collect);
+    if (typeof value !== "object") return;
+    if (value.url && value.source === "agent") uploaded.push(value);
+    else Object.values(value).forEach(collect);
+  })(assets);
+  if (uploaded.length) {
+    await controls.report({
+      state: "uploading",
+      historyRecords: uploaded.map(asset => ({
+        recordId: asset.id,
+        kind: "upload",
+        mediaType: asset.type || "other",
+        createdAt: asset.createdAt,
+        name: asset.name,
+        url: asset.url,
+        width: asset.width,
+        height: asset.height,
+        duration: asset.duration,
+        size: asset.size
+      }))
+    });
+  }
+  located = await createRowFromAgentTask(task, controls, assets);
+  located.pipeline.enqueue([located.row]);
+  notifyAgentRow(located.row);
+  return located.row;
+}
+
+function cancelAgentTask(agentTaskId) {
+  const located = findAgentRow(agentTaskId);
+  if (!located) return false;
+  located.pipeline.cancel(located.row.id, false);
+  located.pipeline.persist();
+  notifyAgentRow(located.row);
+  render();
+  return true;
+}
+
+async function initializeAgentWorker() {
+  if (!AGENT_RUNTIME || !AGENT_TASK_ADAPTER) {
+    console.warn("Agent browser worker scripts are unavailable");
+    return null;
+  }
+  agentWorker = AGENT_RUNTIME.createWorker({
+    workerId: state.agentBrowserId,
+    label: state.agentBrowserLabel,
+    getCapabilities: async () => buildAgentCapabilityManifest(),
+    executeTask: executeAgentTask,
+    cancelTask: cancelAgentTask,
+    onStatus(workerStatus) {
+      state.agentWorkerStatus = workerStatus;
+    }
+  });
+  try {
+    await agentWorker.start();
+  } catch (error) {
+    console.warn("Agent browser worker startup failed", error);
+  }
+  return agentWorker;
+}
 function showFatalError(error) {
   app.innerHTML = `
     <div class="page-placeholder" style="min-height:100vh;padding:24px;">
@@ -13376,6 +13773,7 @@ async function bootstrapApp() {
   await initializeHistoryStorage();
   resumeInterruptedRemoteTasks();
   render();
+  await initializeAgentWorker();
 }
 
 bootstrapApp().catch(error => showFatalError(error));
