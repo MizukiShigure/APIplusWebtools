@@ -324,7 +324,7 @@ assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[
 assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
 assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/prompt-detail-utils\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts and prompt detail utilities must load before app.js");
 assert.match(pageSource, /model-contracts\.js\?v=release-20260730-seedance2-image-video/, "Seedance 2 image-video fix must bypass cached model metadata");
-assert.match(pageSource, /app\.js\?v=release-20260730-seedance2-image-video/, "Seedance 2 image-video fix must bypass cached application code");
+assert.match(pageSource, /app\.js\?v=release-20260731-row-completion-time/, "Current application fixes must bypass cached application code");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");

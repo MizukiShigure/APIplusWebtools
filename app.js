@@ -1917,6 +1917,37 @@ function guessType(url) {
   return "other";
 }
 
+function validCompletionTimestamp(value) {
+  const timestamp = Number(value || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function completionTimeFromSeed(seed = {}) {
+  return seed?.status === "done" ? validCompletionTimestamp(seed.completedAt) : 0;
+}
+
+function clearRowCompletionTime(row) {
+  if (row) row.completedAt = 0;
+  return 0;
+}
+
+function syncRowCompletionTime(row, now = Date.now()) {
+  if (!row || row.status !== "done") return clearRowCompletionTime(row);
+  row.completedAt = validCompletionTimestamp(row.completedAt)
+    || validCompletionTimestamp(row.lastActivityAt)
+    || validCompletionTimestamp(now);
+  return row.completedAt;
+}
+
+function formatRowCompletionTime(value) {
+  const timestamp = validCompletionTimestamp(value);
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = part => String(part).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function createRow(seed = {}) {
   const model = seed.model || "nano";
   const config = IMAGE_MODELS[model];
@@ -1944,6 +1975,7 @@ function createRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -2021,6 +2053,7 @@ function createAvatarRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -2080,6 +2113,7 @@ function createMotionRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -2173,6 +2207,7 @@ function createImageVideoRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -2254,6 +2289,7 @@ function createViduRefRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -2288,6 +2324,7 @@ function createMultiRow(seed = {}) {
     canceledJobs: 0,
     startedAt: Number(seed.startedAt || 0),
     lastActivityAt: Number(seed.lastActivityAt || 0),
+    completedAt: completionTimeFromSeed(seed),
     runToken: seed.runToken || "",
     cancelRequested: Boolean(seed.cancelRequested)
   };
@@ -4119,8 +4156,10 @@ function renderRow(row, index) {
 
 function renderRowStatusCell(row) {
   const error = String(row?.error || "");
+  const completedTime = row?.status === "done" ? formatRowCompletionTime(row.completedAt) : "";
   return `
     <span class="status-pill status-${row.status}">${statusLabel(row)}</span>
+    ${completedTime ? `<div class="meta-line status-completed-time">完成于 ${escapeHtml(completedTime)}</div>` : ""}
     ${error ? `
       <div class="status-error-line">
         <span class="status-summary" title="${escapeAttr(error)}">${escapeHtml(error)}</span>
@@ -8474,6 +8513,7 @@ function renderAssetCard(item) {
 function enqueueRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isRowLocked(row)) return;
+    clearRowCompletionTime(row);
     if (!row.prompt.trim()) {
       row.status = "failed";
       row.error = "Prompt 不能为空";
@@ -8910,6 +8950,7 @@ function addGenerationHistory(record) {
 function enqueueImageVideoRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isImageVideoRowLocked(row)) return;
+    clearRowCompletionTime(row);
     const validationError = validateImageVideoRowBeforeQueue(row);
     if (validationError) {
       row.status = "failed";
@@ -9082,6 +9123,7 @@ function clearDoneImageVideoRows() {
 function enqueueMotionRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isMotionRowLocked(row)) return;
+    clearRowCompletionTime(row);
     const validationError = validateMotionRowBeforeQueue(row);
     if (validationError) {
       row.status = "failed";
@@ -9268,6 +9310,7 @@ function clearDoneMotionRows() {
 function enqueueAvatarRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isAvatarRowLocked(row)) return;
+    clearRowCompletionTime(row);
     const validationError = validateAvatarRowBeforeQueue(row);
     if (validationError) {
       row.status = "failed";
@@ -9463,6 +9506,7 @@ function clearDoneAvatarRows() {
 function enqueueMultiRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isMultiRowLocked(row)) return;
+    clearRowCompletionTime(row);
     if (!row.prompt.trim()) {
       row.status = "failed";
       row.error = "Prompt 不能为空";
@@ -9637,6 +9681,7 @@ function clearDoneMultiRows() {
 function enqueueViduRefRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isViduRefRowLocked(row)) return;
+    clearRowCompletionTime(row);
     const validationError = validateViduRefRowBeforeQueue(row);
     if (validationError) {
       row.status = "failed";
@@ -9884,6 +9929,7 @@ function clearSubmittedArtifacts(row) {
   row.results = [];
   row.remoteTasks = [];
   row.completedTaskIds = [];
+  clearRowCompletionTime(row);
   if (Array.isArray(row.returnedSeeds)) row.returnedSeeds = [];
   row.totalJobs = 0;
   row.queuedJobs = 0;
@@ -9930,7 +9976,10 @@ function refreshRowSubmittedStateDisplay(row) {
 }
 
 function updateRowStatus(row) {
-  if (row.status === "dirty" && !row.queuedJobs && !row.runningJobs && !hasSubmittedArtifacts(row)) return;
+  if (row.status === "dirty" && !row.queuedJobs && !row.runningJobs && !hasSubmittedArtifacts(row)) {
+    clearRowCompletionTime(row);
+    return;
+  }
   if (row.runningJobs > 0 && row.finishedJobs + row.canceledJobs < row.totalJobs) {
     row.status = row.finishedJobs > 0 || row.queuedJobs > 0 ? "partial" : "running";
   } else if (row.queuedJobs > 0) {
@@ -9946,6 +9995,7 @@ function updateRowStatus(row) {
   } else {
     row.status = "pending";
   }
+  syncRowCompletionTime(row);
 }
 
 function statusLabel(row) {
