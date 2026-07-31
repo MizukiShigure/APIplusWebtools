@@ -1,0 +1,4 @@
+interface:
+  display_name: "API Plus Agent"
+  short_description: "Submit local media tasks through the browser worker"
+  default_prompt: "Use the local API Plus Agent service to submit and monitor this media generation request."
