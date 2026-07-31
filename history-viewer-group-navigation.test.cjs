@@ -115,4 +115,37 @@ assert.match(groupBuilderSource, /filteredGenerationInputGroups\(\)/);
 assert.doesNotMatch(groupBuilderSource, /visibleGenerationInputGroups\(\)/);
 assert.match(packageJson.scripts.test, /node history-viewer-group-navigation\.test\.cjs/);
 
+const ensureViewerSource = extractFunction(appSource, "ensureHistoryVideoOverlay");
+const openViewerSource = extractFunction(appSource, "openHistoryMediaViewer");
+const deleteViewerSource = extractFunction(appSource, "deleteHistoryMediaFromViewer");
+
+assert.match(ensureViewerSource, /data-history-viewer-prev-group[^>]*>上一组</);
+assert.match(ensureViewerSource, /data-history-viewer-prev[^>]*>上一条</);
+assert.match(ensureViewerSource, /data-history-viewer-next[^>]*>下一条</);
+assert.match(ensureViewerSource, /data-history-viewer-next-group[^>]*>下一组</);
+assert.match(ensureViewerSource, /data-history-viewer-prev-group/);
+assert.match(openViewerSource, /source === "history" && entry\.item\?\.key/);
+assert.match(openViewerSource, /generationHistoryNavigationGroups\(entry\.item\.type\)/);
+assert.match(openViewerSource, /groupedHistoryNavigationTargets/);
+assert.match(openViewerSource, /prevGroupButton\.hidden = !groupedTargets/);
+assert.match(openViewerSource, /nextGroupButton\.hidden = !groupedTargets/);
+assert.match(deleteViewerSource, /groupedHistoryDeleteTarget/);
+assert.match(deleteViewerSource, /openHistoryMediaViewer\(nextEntry\.token/);
+assert.match(ensureViewerSource, /ArrowLeft[\s\S]*data-history-viewer-prev/);
+assert.match(ensureViewerSource, /ArrowRight[\s\S]*data-history-viewer-next/);
+assert.match(
+  cssSource,
+  /\.history-video-viewer-head\s*\{[\s\S]*?grid-template-columns:\s*auto auto minmax\(0, 1fr\) auto auto auto/
+);
+assert.match(openViewerSource, /classList\.toggle\("grouped-navigation", Boolean\(groupedTargets\)\)/);
+assert.match(
+  cssSource,
+  /\.history-video-overlay:not\(\.grouped-navigation\) \.history-video-viewer-head\s*\{[\s\S]*?grid-template-columns:\s*auto minmax\(0, 1fr\) auto auto/
+);
+assert.match(
+  cssSource,
+  /@media \(max-width: 820px\)[\s\S]*?\.history-video-overlay \.history-video-viewer-head\s*\{[\s\S]*?grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/
+);
+assert.match(pageSource, /app\.js\?v=release-20260731-history-group-navigation/);
+
 console.log("history viewer group navigation checks passed");

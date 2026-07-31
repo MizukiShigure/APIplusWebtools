@@ -11617,6 +11617,8 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
   const detailPanel = overlay.querySelector("[data-history-viewer-details]");
   const prevFrameButton = overlay.querySelector("[data-history-viewer-prev-frame]");
   const nextFrameButton = overlay.querySelector("[data-history-viewer-next-frame]");
+  const prevGroupButton = overlay.querySelector("[data-history-viewer-prev-group]");
+  const nextGroupButton = overlay.querySelector("[data-history-viewer-next-group]");
   const prevButton = overlay.querySelector("[data-history-viewer-prev]");
   const nextButton = overlay.querySelector("[data-history-viewer-next]");
 
@@ -11625,6 +11627,10 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
     const list = firstEntry ? historyMediaNavigationItems(firstEntry, source) : historyMediaItems(preferredType || state.historyType);
     const entry = list.find(item => item.token === nextToken || item.item?.url === firstEntry?.item?.url) || firstEntry;
     if (!entry) return;
+    const groupedTargets = source === "history" && entry.item?.key
+      ? groupedHistoryNavigationTargets(generationHistoryNavigationGroups(entry.item.type), entry)
+      : null;
+    overlay.classList.toggle("grouped-navigation", Boolean(groupedTargets));
     const isVideo = entry.item.type === "video";
     const isImage = entry.item.type === "image";
     overlay.dataset.currentToken = entry.token;
@@ -11667,15 +11673,40 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
         reuseButton.textContent = "添加到原任务队列";
       }, 1200);
     };
-    const index = list.findIndex(item => item.token === entry.token || item.item?.url === entry.item?.url);
-    prevButton.disabled = index <= 0;
-    nextButton.disabled = index < 0 || index >= list.length - 1;
-    prevButton.onclick = () => {
-      if (index > 0) renderToken(list[index - 1].token);
-    };
-    nextButton.onclick = () => {
-      if (index >= 0 && index < list.length - 1) renderToken(list[index + 1].token);
-    };
+    prevGroupButton.hidden = !groupedTargets;
+    nextGroupButton.hidden = !groupedTargets;
+    if (groupedTargets) {
+      prevButton.disabled = !groupedTargets.previousItem;
+      nextButton.disabled = !groupedTargets.nextItem;
+      prevGroupButton.disabled = !groupedTargets.previousGroup;
+      nextGroupButton.disabled = !groupedTargets.nextGroup;
+      prevButton.onclick = () => {
+        if (groupedTargets.previousItem) renderToken(groupedTargets.previousItem.token);
+      };
+      nextButton.onclick = () => {
+        if (groupedTargets.nextItem) renderToken(groupedTargets.nextItem.token);
+      };
+      prevGroupButton.onclick = () => {
+        if (groupedTargets.previousGroup) renderToken(groupedTargets.previousGroup.token);
+      };
+      nextGroupButton.onclick = () => {
+        if (groupedTargets.nextGroup) renderToken(groupedTargets.nextGroup.token);
+      };
+    } else {
+      const index = list.findIndex(item => item.token === entry.token || item.item?.url === entry.item?.url);
+      prevGroupButton.disabled = true;
+      nextGroupButton.disabled = true;
+      prevGroupButton.onclick = null;
+      nextGroupButton.onclick = null;
+      prevButton.disabled = index <= 0;
+      nextButton.disabled = index < 0 || index >= list.length - 1;
+      prevButton.onclick = () => {
+        if (index > 0) renderToken(list[index - 1].token);
+      };
+      nextButton.onclick = () => {
+        if (index >= 0 && index < list.length - 1) renderToken(list[index + 1].token);
+      };
+    }
   };
 
   overlay.classList.add("open");
@@ -11685,7 +11716,10 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
 
 function ensureHistoryVideoOverlay() {
   let overlay = document.querySelector(".history-video-overlay");
-  if (overlay && !overlay.querySelector("[data-history-viewer-image]")) {
+  if (overlay && (
+    !overlay.querySelector("[data-history-viewer-image]")
+    || !overlay.querySelector("[data-history-viewer-prev-group]")
+  )) {
     overlay.remove();
     overlay = null;
   }
@@ -11695,9 +11729,11 @@ function ensureHistoryVideoOverlay() {
   overlay.innerHTML = `
     <div class="history-video-viewer">
       <div class="history-video-viewer-head">
-        <button class="ghost-button" data-history-viewer-prev type="button">上一个</button>
+        <button class="ghost-button" data-history-viewer-prev-group type="button">上一组</button>
+        <button class="ghost-button" data-history-viewer-prev type="button">上一条</button>
         <strong class="history-viewer-title" data-history-viewer-title></strong>
-        <button class="ghost-button" data-history-viewer-next type="button">下一个</button>
+        <button class="ghost-button" data-history-viewer-next type="button">下一条</button>
+        <button class="ghost-button" data-history-viewer-next-group type="button">下一组</button>
         <button class="ghost-button" data-history-viewer-close type="button">关闭</button>
       </div>
       <video class="history-viewer-video" data-history-viewer-video controls crossorigin="anonymous"></video>
@@ -11800,7 +11836,14 @@ function deleteHistoryMediaFromViewer(entry, source = "history") {
   if (!ok) return;
   const list = historyMediaNavigationItems(entry, source);
   const index = list.findIndex(item => item.token === entry.token || item.item?.url === entry.item?.url);
-  const nextEntry = index >= 0 ? (list[index + 1] || list[index - 1] || null) : null;
+  const flatDeleteTarget = index >= 0 ? (list[index + 1] || list[index - 1] || null) : null;
+  const grouped = source === "history" && entry.item?.key
+    ? generationHistoryNavigationGroups(entry.item.type)
+    : [];
+  const groupedCursor = findGroupedHistoryCursor(grouped, entry);
+  const nextEntry = groupedCursor
+    ? groupedHistoryDeleteTarget(grouped, entry)
+    : flatDeleteTarget;
   if (entry.item?.key) {
     deleteGenerationResults([entry.item.key], { render: false });
   } else if (entry.item?.id) {
@@ -11808,7 +11851,7 @@ function deleteHistoryMediaFromViewer(entry, source = "history") {
   }
   render();
   if (nextEntry?.item?.url) {
-    openHistoryMediaViewer(`url:${nextEntry.item.url}`, source, nextEntry.item.type);
+    openHistoryMediaViewer(nextEntry.token || `url:${nextEntry.item.url}`, source, nextEntry.item.type);
   } else {
     closeHistoryVideoOverlay(document.querySelector(".history-video-overlay"));
   }
