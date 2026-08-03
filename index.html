@@ -11,17 +11,20 @@
 
   <dialog id="assetDialog" class="modal">
     <form method="dialog" class="modal-panel">
-      <div class="modal-head">
-        <h2>选择历史上传素材</h2>
-        <button class="ghost-button" value="cancel" type="submit">关闭</button>
+      <div class="asset-dialog-toolbar">
+        <div class="modal-head">
+          <h2>选择历史上传素材</h2>
+          <button class="ghost-button" value="cancel" type="submit">关闭</button>
+        </div>
+        <div class="asset-filter">
+          <button class="filter-chip active" data-filter="image" type="button">图片</button>
+          <button class="filter-chip" data-filter="video" type="button">视频</button>
+          <button class="filter-chip" data-filter="audio" type="button">音频</button>
+          <button class="filter-chip" data-filter="other" type="button">其他</button>
+          <button id="assetFavoritesOnly" class="filter-chip" type="button" aria-pressed="false">仅看收藏</button>
+        </div>
       </div>
-      <div class="asset-filter">
-        <button class="filter-chip active" data-filter="image" type="button">图片</button>
-        <button class="filter-chip" data-filter="video" type="button">视频</button>
-        <button class="filter-chip" data-filter="audio" type="button">音频</button>
-        <button class="filter-chip" data-filter="other" type="button">其他</button>
-      </div>
-      <div id="assetDialogGrid" class="asset-grid"></div>
+      <div id="assetDialogGrid" class="asset-grid asset-dialog-grid"></div>
     </form>
   </dialog>
 

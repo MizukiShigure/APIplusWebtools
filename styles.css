@@ -2514,3 +2514,50 @@ input:disabled {
     overflow-wrap: anywhere;
   }
 }
+
+#assetDialog .modal-panel {
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.asset-dialog-toolbar {
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  margin: -16px -16px 0;
+  padding: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.asset-dialog-grid {
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.asset-dialog-grid .asset-card {
+  cursor: pointer;
+  position: relative;
+  text-align: left;
+}
+
+.asset-dialog-grid .asset-card:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.asset-card-favorite {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+}
+
+.asset-dialog-grid .asset-card > strong {
+  overflow-wrap: anywhere;
+  padding-right: 34px;
+}

@@ -8850,88 +8850,135 @@ function renderAssetDialog() {
       renderAssetDialog();
     };
   });
-  const list = state.uploadHistory.filter(item => item.type === state.assetFilter);
-  assetDialogGrid.innerHTML = list.length ? list.map(renderAssetCard).join("") : `<div class="meta-line">没有可选素材</div>`;
+  const favoriteFilter = assetDialog.querySelector("#assetFavoritesOnly");
+  favoriteFilter.classList.toggle("active", state.assetFavoritesOnly);
+  favoriteFilter.setAttribute("aria-pressed", String(state.assetFavoritesOnly));
+  favoriteFilter.onclick = () => {
+    state.assetFavoritesOnly = !state.assetFavoritesOnly;
+    localStorage.setItem(STORAGE_KEYS.assetFavoritesOnly, state.assetFavoritesOnly ? "1" : "0");
+    renderAssetDialog();
+  };
+
+  const list = ASSET_HISTORY_UTILS.filterPicker(
+    state.uploadHistory,
+    state.assetFilter,
+    state.uploadFavorites,
+    state.assetFavoritesOnly
+  );
+  assetDialogGrid.innerHTML = list.length ? list.map(renderAssetCard).join("") : `<div class="meta-line">${state.assetFavoritesOnly ? "当前分类没有已收藏素材" : "没有可选素材"}</div>`;
   assetDialogGrid.querySelectorAll(".asset-card").forEach(card => {
-    card.addEventListener("click", () => {
-      const asset = state.uploadHistory.find(item => item.id === card.dataset.assetId);
-      if (String(state.choosingRowId || "").startsWith("multi:") && asset) {
-        const row = findMultiRow(String(state.choosingRowId).slice(6));
-        if (row) addRefsToMultiRow(row, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("viduRef:") && asset) {
-        const row = findViduRefRow(String(state.choosingRowId).slice(8));
-        if (row) addRefsToViduRefRow(row, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("iv:") && asset) {
-        const [, field, rowId] = String(state.choosingRowId).split(":");
-        const row = findImageVideoRow(rowId);
-        if (row) addFrameToImageVideoRow(row, field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("motion:") && asset) {
-        const [, field, rowId] = String(state.choosingRowId).split(":");
-        const row = findMotionRow(rowId);
-        if (row) addAssetToMotionRow(row, field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("avatar:") && asset) {
-        const [, field, rowId] = String(state.choosingRowId).split(":");
-        const row = findAvatarRow(rowId);
-        if (row) addAssetToAvatarRow(row, field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("suno:") && asset) {
-        const [, opKey, field] = String(state.choosingRowId).split(":");
-        addAssetToSunoField(opKey, field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("viduVoice:") && asset) {
-        const [, field] = String(state.choosingRowId).split(":");
-        addAssetToViduVoiceField(field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      if (String(state.choosingRowId || "").startsWith("subject:") && asset) {
-        const [, field] = String(state.choosingRowId).split(":");
-        addAssetsToSubjectField(field, [asset]);
-        assetDialog.close();
-        return;
-      }
-      const row = findRow(state.choosingRowId);
-      if (state.choosingRowId === "__batch__" && asset) {
-        state.batchImages = mergeAssets(state.batchImages, [asset], getBatchModel().maxImages);
-        assetDialog.close();
-        renderBatchImages();
-        return;
-      }
-      if (row && asset) {
-        markRowDirty(row);
-        row.images = mergeAssets(row.images, [asset], getModel(row).maxImages);
-        persistRows();
-        assetDialog.close();
-        render();
-      }
+    const asset = state.uploadHistory.find(item => item.id === card.dataset.assetId);
+    const choose = () => {
+      if (asset) chooseAssetFromDialog(asset);
+    };
+    const favoriteButton = card.querySelector("[data-asset-favorite]");
+    favoriteButton.addEventListener("click", event => {
+      event.stopPropagation();
+      if (asset) toggleUploadFavorite(asset);
+    });
+    card.querySelectorAll("audio, video, a").forEach(control => {
+      control.addEventListener("click", event => event.stopPropagation());
+    });
+    card.addEventListener("click", choose);
+    card.addEventListener("keydown", event => {
+      if (event.target !== card || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      choose();
     });
   });
 }
 
+function toggleUploadFavorite(item) {
+  const key = ASSET_HISTORY_UTILS.favoriteKey(item);
+  if (!key) return;
+  if (state.uploadFavorites.has(key)) {
+    state.uploadFavorites.delete(key);
+  } else {
+    state.uploadFavorites.add(key);
+  }
+  saveJson(STORAGE_KEYS.uploadFavorites, Array.from(state.uploadFavorites));
+  renderAssetDialog();
+}
+
+function chooseAssetFromDialog(asset) {
+  if (String(state.choosingRowId || "").startsWith("multi:")) {
+    const row = findMultiRow(String(state.choosingRowId).slice(6));
+    if (row) addRefsToMultiRow(row, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("viduRef:")) {
+    const row = findViduRefRow(String(state.choosingRowId).slice(8));
+    if (row) addRefsToViduRefRow(row, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("iv:")) {
+    const [, field, rowId] = String(state.choosingRowId).split(":");
+    const row = findImageVideoRow(rowId);
+    if (row) addFrameToImageVideoRow(row, field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("motion:")) {
+    const [, field, rowId] = String(state.choosingRowId).split(":");
+    const row = findMotionRow(rowId);
+    if (row) addAssetToMotionRow(row, field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("avatar:")) {
+    const [, field, rowId] = String(state.choosingRowId).split(":");
+    const row = findAvatarRow(rowId);
+    if (row) addAssetToAvatarRow(row, field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("suno:")) {
+    const [, opKey, field] = String(state.choosingRowId).split(":");
+    addAssetToSunoField(opKey, field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("viduVoice:")) {
+    const [, field] = String(state.choosingRowId).split(":");
+    addAssetToViduVoiceField(field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (String(state.choosingRowId || "").startsWith("subject:")) {
+    const [, field] = String(state.choosingRowId).split(":");
+    addAssetsToSubjectField(field, [asset]);
+    assetDialog.close();
+    return;
+  }
+  if (state.choosingRowId === "__batch__") {
+    state.batchImages = mergeAssets(state.batchImages, [asset], getBatchModel().maxImages);
+    assetDialog.close();
+    renderBatchImages();
+    return;
+  }
+  const row = findRow(state.choosingRowId);
+  if (row) {
+    markRowDirty(row);
+    row.images = mergeAssets(row.images, [asset], getModel(row).maxImages);
+    persistRows();
+    assetDialog.close();
+    render();
+  }
+}
+
 function renderAssetCard(item) {
+  const favoriteKey = ASSET_HISTORY_UTILS.favoriteKey(item);
+  const isFavorite = favoriteKey && state.uploadFavorites.has(favoriteKey);
   return `
-    <button class="asset-card" data-asset-id="${item.id}" type="button">
+    <article class="asset-card" data-asset-id="${escapeAttr(item.id)}" role="button" tabindex="0">
+      <button class="favorite-button asset-card-favorite ${isFavorite ? "active" : ""}" data-asset-favorite="${escapeAttr(item.id)}" type="button" aria-label="${isFavorite ? "取消收藏" : "收藏"}" title="${isFavorite ? "取消收藏" : "收藏"}">${isFavorite ? "★" : "☆"}</button>
       ${item.type === "video" ? `<video src="${escapeAttr(item.url)}"></video>` : item.type === "audio" ? `<audio src="${escapeAttr(item.url)}" controls></audio>` : item.type === "image" ? `<img src="${escapeAttr(item.preview || item.url)}" alt="">` : `<div class="meta-line">文件</div>`}
       <strong>${escapeHtml(item.name || shortUrl(item.url))}</strong>
       <span class="meta-line">${assetMeta(item)}</span>
       <span class="url-line">${escapeHtml(shortUrl(item.url))}</span>
-    </button>
+    </article>
   `;
 }
 
