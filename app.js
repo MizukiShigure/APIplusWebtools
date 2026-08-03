@@ -10,6 +10,7 @@ const SUNO_API_DEFAULT = "https://api.sunoapi.org/api/v1";
 const MODEL_CONTRACTS = globalThis.ApiBatchModelContracts;
 const PROMPT_DETAIL_UTILS = globalThis.ApiBatchPromptDetailUtils;
 const HISTORY_ORIGIN_UTILS = globalThis.ApiBatchHistoryOriginUtils;
+const ASSET_HISTORY_UTILS = globalThis.AssetHistoryUtils;
 const AGENT_TASK_ADAPTER = globalThis.ApiBatchAgentTaskAdapter;
 const AGENT_RUNTIME = globalThis.ApiBatchAgentRuntime;
 const { insertPromptToken } = PROMPT_DETAIL_UTILS;
@@ -62,6 +63,8 @@ const STORAGE_KEYS = {
   uploadHistory: "api_console_upload_history_v2",
   generationHistory: "api_console_generation_history_v2",
   generationFavorites: "api_console_generation_favorites_v1",
+  uploadFavorites: "api_console_upload_favorites_v1",
+  assetFavoritesOnly: "api_console_asset_favorites_only_v1",
   historyFavoritesOnly: "api_console_history_favorites_only",
   agentBrowserId: "api_console_agent_browser_id_v1",
   agentBrowserLabel: "api_console_agent_browser_label_v1"
@@ -1040,6 +1043,7 @@ const state = {
   uploadHistory: [],
   generationHistory: [],
   generationFavorites: new Set(loadJson(STORAGE_KEYS.generationFavorites, [])),
+  uploadFavorites: new Set(loadJson(STORAGE_KEYS.uploadFavorites, [])),
   agentBrowserId: localStorage.getItem(STORAGE_KEYS.agentBrowserId) || uid("browser"),
   agentBrowserLabel: localStorage.getItem(STORAGE_KEYS.agentBrowserLabel) || "本机浏览器",
   agentWorkerStatus: { connection: "offline", active: false, lastError: "" },
@@ -1066,6 +1070,7 @@ const state = {
   copiedRefs: [],
   choosingRowId: null,
   assetFilter: "image",
+  assetFavoritesOnly: localStorage.getItem(STORAGE_KEYS.assetFavoritesOnly) === "1",
   historyTab: ["uploads", "generations"].includes(localStorage.getItem(STORAGE_KEYS.historyTab)) ? localStorage.getItem(STORAGE_KEYS.historyTab) : "uploads",
   historyType: HISTORY_TYPES.includes(localStorage.getItem(STORAGE_KEYS.historyType)) ? localStorage.getItem(STORAGE_KEYS.historyType) : "image",
   historyModel: localStorage.getItem(STORAGE_KEYS.historyModel) || "all",
@@ -1583,7 +1588,7 @@ function looksLikeGenerationHistory(value) {
 
 function pruneUploadHistory(records) {
   const counts = {};
-  return normalizeAssets(records)
+  return ASSET_HISTORY_UTILS.dedupe(normalizeAssets(records))
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     .filter(item => {
       const type = HISTORY_TYPES.includes(item.type) ? item.type : "other";
@@ -8819,14 +8824,15 @@ function addUploadHistory(asset) {
     origin: asset?.origin ? normalizeHistoryOrigin(asset.origin) : browserOrigin,
     executedBy: asset?.executedBy ? normalizeHistoryOrigin(asset.executedBy) : browserOrigin
   }])[0];
-  if (!normalized) return;
-  const historyKey = `${HISTORY_ORIGIN_UTILS.originKey(normalized.origin)}::${normalized.url}`;
-  const withoutDuplicate = state.uploadHistory.filter(item => `${HISTORY_ORIGIN_UTILS.originKey(item.origin)}::${item.url}` !== historyKey);
-  const sameType = [normalized, ...withoutDuplicate.filter(item => item.type === normalized.type)].slice(0, HISTORY_RETENTION_PER_TYPE);
-  const otherTypes = withoutDuplicate.filter(item => item.type !== normalized.type);
+  if (!normalized) return null;
+  const duplicate = ASSET_HISTORY_UTILS.findDuplicate(state.uploadHistory, normalized);
+  if (duplicate) return duplicate;
+  const sameType = [normalized, ...state.uploadHistory.filter(item => item.type === normalized.type)].slice(0, HISTORY_RETENTION_PER_TYPE);
+  const otherTypes = state.uploadHistory.filter(item => item.type !== normalized.type);
   state.uploadHistory = [...sameType, ...otherTypes].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   persistUploadHistory();
   scheduleControlHistoryAppend([{ ...normalized, kind: "upload" }]);
+  return normalized;
 }
 
 function openAssetDialog(rowId, filter) {
