@@ -2,7 +2,7 @@
 
 本项目是一个本地浏览器批量生成工具。普通用户可以双击启动，开发者或编码 Agent 可以直接在同一个目录中阅读源码、运行测试并继续扩展。
 
-当前版本：`v2026.08.01-local-agent-api.1`
+当前版本：`v2026.08.03-asset-picker.1`
 
 ## 直接使用
 
@@ -107,7 +107,7 @@ npm run package
 默认输出：
 
 ```text
-dist\Internal_API_Batch_Portable_v2026.08.01-local-agent-api.1.zip
+dist\Internal_API_Batch_Portable_v2026.08.03-asset-picker.1.zip
 ```
 
 这个 ZIP 同时包含：
@@ -142,7 +142,7 @@ git tag --sort=-creatordate
 回退可以双击 `Restore_Version.bat`，或执行：
 
 ```powershell
-git checkout v2026.08.01-local-agent-api.1
+git checkout v2026.08.03-asset-picker.1
 ```
 
 回到主线：

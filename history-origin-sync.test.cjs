@@ -73,13 +73,15 @@ test("never converts an empty record into a control-history write", () => {
   assert.equal(toControlRecord(null, { kind: "generation" }), null);
   assert.equal(toControlRecord({}, { kind: "generation" }), null);
 });
-test("loads history origin utilities before the application", () => {
+test("loads application dependencies before the application", () => {
   const page = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-  assert.match(
-    page,
-    /history-origin-utils\.js[^>]*><\/script>\s*<script src="\.\/agent-task-adapter\.js[^>]*><\/script>[\s\S]*?<script src="\.\/app\.js/,
-    "history origin utilities must be available before app.js"
-  );
+  const historyIndex = page.indexOf("history-origin-utils.js");
+  const assetIndex = page.indexOf("asset-history-utils.js");
+  const agentIndex = page.indexOf("agent-task-adapter.js");
+  const appIndex = page.indexOf("app.js");
+  assert.ok([historyIndex, assetIndex, agentIndex, appIndex].every(index => index >= 0));
+  assert.ok(historyIndex < assetIndex && assetIndex < agentIndex && agentIndex < appIndex,
+    "history, asset, and Agent dependencies must be available before app.js");
 });
 test("integrates incremental control history without empty snapshot writes", () => {
   const app = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");

@@ -109,7 +109,7 @@ assert.match(extractFunction(appSource, "updateRowStatus"), /syncRowCompletionTi
 assert.match(extractFunction(appSource, "renderRowStatusCell"), /formatRowCompletionTime/);
 assert.match(extractFunction(appSource, "renderRowStatusCell"), /status-completed-time/);
 assert.match(extractFunction(appSource, "renderRowStatusCell"), /\u5b8c\u6210\u4e8e/);
-assert.match(pageSource, /app\.js\?v=release-20260731-history-group-navigation/);
+assert.match(pageSource, /app\.js\?v=release-20260803-asset-picker-favorites-dedup/);
 assert.match(packageJson.scripts.test, /node row-completion-time\.test\.cjs/);
 
 console.log("row completion time checks passed");

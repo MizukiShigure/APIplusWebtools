@@ -60,6 +60,11 @@ $publicFiles = @(
   "agent-ui-contract.test.cjs",
   "agent-worker-integration.test.cjs",
   "app.js",
+  "asset-history-integration.test.cjs",
+  "asset-history-utils.js",
+  "asset-history-utils.test.cjs",
+  "asset-picker-ui-contract.test.cjs",
+  "asset-upload-flow.test.cjs",
   "styles.css",
   "index.html",
   "server-agent-integration.test.cjs",
@@ -128,8 +133,21 @@ try {
   }
 
   $archiveItems = @(Get-ChildItem -LiteralPath $stage -Force | Select-Object -ExpandProperty FullName)
-  Compress-Archive -LiteralPath $archiveItems -DestinationPath $temporaryArchive -Force
-  if (-not (Test-Path -LiteralPath $temporaryArchive -PathType Leaf)) {
+  $archiveCreated = $false
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $temporaryArchive) {
+        Remove-Item -LiteralPath $temporaryArchive -Force
+      }
+      Compress-Archive -LiteralPath $archiveItems -DestinationPath $temporaryArchive -Force
+      $archiveCreated = $true
+      break
+    } catch {
+      if ($attempt -ge 5) { throw }
+      Start-Sleep -Milliseconds (200 * $attempt)
+    }
+  }
+  if (-not $archiveCreated -or -not (Test-Path -LiteralPath $temporaryArchive -PathType Leaf)) {
     throw "Portable archive build did not produce a ZIP file."
   }
 

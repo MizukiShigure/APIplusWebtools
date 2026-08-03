@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.08.03-asset-picker.1
+
+- Added independent favorites and a favorites-only filter to the upload-asset picker.
+- Kept the picker title, close action, media tabs, and favorite filter fixed while only the asset grid scrolls.
+- Added exact SHA-256 upload deduplication across browser and Agent upload paths; only matching original filename, media metadata, and content reuse the canonical URL.
+- Preserved original-file identity when Seedance or Agent upload preparation compresses the transported media.
+- Updated the privacy-clean portable package with the new helper module and regression tests without including personal cache or favorite state.
+
 ## v2026.08.01-local-agent-api.1
 
 - Added an authenticated loopback-only Agent API with idempotent task submission and append-only task/history journals.

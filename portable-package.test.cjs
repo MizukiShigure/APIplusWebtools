@@ -30,6 +30,11 @@ const expectedFiles = [
   "agent-ui-contract.test.cjs",
   "agent-worker-integration.test.cjs",
   "app.js",
+  "asset-history-integration.test.cjs",
+  "asset-history-utils.js",
+  "asset-history-utils.test.cjs",
+  "asset-picker-ui-contract.test.cjs",
+  "asset-upload-flow.test.cjs",
   "compact-model-params-layout.test.cjs",
   "data/.keep",
   "dirty-row-clear.test.cjs",
@@ -138,8 +143,8 @@ const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
-  assert(version === "v2026.08.01-local-agent-api.1", "VERSION must contain the release tag");
-  assert(changelog.includes("v2026.08.01-local-agent-api.1"), "changelog must include the release tag");
+  assert(version === "v2026.08.03-asset-picker.1", "VERSION must contain the release tag");
+  assert(changelog.includes("v2026.08.03-asset-picker.1"), "changelog must include the release tag");
   assert(packageJson.scripts.start === "node server.cjs", "package start script must launch server.cjs");
   assert(packageJson.scripts.test.includes("portable-package.test.cjs"), "package test script must verify the distributable");
   assert(fs.existsSync(builder), "portable builder is missing");
@@ -225,7 +230,7 @@ try {
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");
   assert(/if not exist "\.git"/i.test(updateScript), "Update_From_Git.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(updateScript), "Update_From_Git.bat must explain that a Git clone is required in a ZIP install");
-  assert(restoreScript.includes("v2026.08.01-local-agent-api.1"), "Restore_Version.bat must show the current release tag example");
+  assert(restoreScript.includes("v2026.08.03-asset-picker.1"), "Restore_Version.bat must show the current release tag example");
 
   console.log("portable-package checks passed");
 } finally {
