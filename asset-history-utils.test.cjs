@@ -46,10 +46,27 @@ const differentContent = asset({
   contentHash: "b".repeat(64)
 });
 
+const sameContentDifferentName = asset({
+  id: "asset-name-2",
+  name: "portrait-copy.png",
+  originalName: "portrait-copy.png"
+});
+const sameContentDifferentDimensions = asset({
+  id: "asset-size-2",
+  width: 1536,
+  height: 1024,
+  originalWidth: 1536,
+  originalHeight: 1024
+});
+
 assert.equal(exactFingerprint(first), exactFingerprint(sameContentDifferentUrl));
 assert.notEqual(exactFingerprint(first), exactFingerprint(differentContent));
+assert.notEqual(exactFingerprint(first), exactFingerprint(sameContentDifferentName));
+assert.notEqual(exactFingerprint(first), exactFingerprint(sameContentDifferentDimensions));
 assert.equal(findDuplicate([first], sameContentDifferentUrl), first);
 assert.equal(findDuplicate([first], differentContent), null);
+assert.equal(findDuplicate([first], sameContentDifferentName), null);
+assert.equal(findDuplicate([first], sameContentDifferentDimensions), null);
 
 const legacy = asset({ contentHash: "", originalName: undefined });
 const legacyDifferentUrl = asset({

@@ -1930,6 +1930,39 @@ function uploadResponseUrl(json) {
   return assetUrl(json?.data || json?.url || json?.file || json?.result || json);
 }
 
+async function postUploadFile(file) {
+  const form = new FormData();
+  form.append("file", file, file.name || "upload-file");
+  const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
+  const body = await response.text();
+  let json = {};
+  try {
+    json = body ? JSON.parse(body) : {};
+  } catch {
+    json = { message: body };
+  }
+  const uploadedUrl = uploadResponseUrl(json);
+  if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
+  return uploadedUrl;
+}
+
+async function uploadLocalFileAsset(file, options = {}) {
+  const identityMeta = options.identityMeta || await getFileMeta(file);
+  const uploadFile = options.uploadFile || file;
+  const uploadMeta = options.uploadMeta || (uploadFile === file ? identityMeta : await getFileMeta(uploadFile));
+  const resolved = await ASSET_HISTORY_UTILS.resolveUpload({
+    file,
+    identityMeta,
+    uploadFile,
+    uploadMeta,
+    history: state.uploadHistory,
+    upload: postUploadFile,
+    createId: () => uid("asset"),
+    overrides: options.overrides || {}
+  });
+  return resolved.asset;
+}
+
 function normalizeGenerations(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => ({
@@ -7082,34 +7115,19 @@ function addAssetToAvatarRow(row, field, assets) {
   render();
 }
 
+
 async function uploadAvatarAssetFiles(files, rowId, field) {
   const row = findAvatarRow(rowId);
   if (!row || isAvatarRowLocked(row)) return;
   const expectedType = field === "audio" ? "audio" : "image";
-  const accepted = files.filter(file => file.type.startsWith(`${expectedType}/`)).slice(0, 1);
+  const accepted = files.filter(file => file.type.startsWith(expectedType + "/")).slice(0, 1);
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addAssetToAvatarRow(row, field, [{
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      }]);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      addAssetToAvatarRow(row, field, [asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -7171,27 +7189,13 @@ function addAssetToViduVoiceField(field, assets) {
   render();
 }
 
+
 async function uploadViduVoiceFiles(files, field = null) {
   const accepted = files.filter(file => file.type.startsWith("audio/"));
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      const asset = {
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      };
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
       if (field) {
         addAssetToViduVoiceField(field, [asset]);
       } else {
@@ -7199,7 +7203,7 @@ async function uploadViduVoiceFiles(files, field = null) {
         render();
       }
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -7418,36 +7422,20 @@ function addAssetsToSubjectField(field, assets) {
   render();
 }
 
+
 async function uploadSubjectAssets(files, field = null, assetType = null) {
-  const accepted = files.filter(file => !assetType || file.type.startsWith(`${assetType}/`));
+  const accepted = files.filter(file => !assetType || file.type.startsWith(assetType + "/"));
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const formData = new FormData();
-    formData.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: formData });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      const asset = {
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      };
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
       if (field) addAssetsToSubjectField(field, [asset]);
       else {
         addUploadHistory(asset);
         render();
       }
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -7679,34 +7667,19 @@ function addAssetToMotionRow(row, field, assets) {
   render();
 }
 
+
 async function uploadMotionAssetFiles(files, rowId, field) {
   const row = findMotionRow(rowId);
   if (!row || isMotionRowLocked(row)) return;
   const expectedType = field === "video" ? "video" : "image";
-  const accepted = files.filter(file => file.type.startsWith(`${expectedType}/`)).slice(0, 1);
+  const accepted = files.filter(file => file.type.startsWith(expectedType + "/")).slice(0, 1);
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addAssetToMotionRow(row, field, [{
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      }]);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      addAssetToMotionRow(row, field, [asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -7786,29 +7759,16 @@ function removeSunoAsset(opKey, assetId) {
   render();
 }
 
+
 async function uploadSunoAssetFiles(files, opKey, field) {
   const accepted = files.filter(file => file.type.startsWith("audio/")).slice(0, 1);
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addAssetToSunoField(opKey, field, [{
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      }]);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      addAssetToSunoField(opKey, field, [asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -8300,32 +8260,18 @@ function persistSunoState() {
   saveJson(STORAGE_KEYS.sunoState, state.sunoState);
 }
 
+
 async function uploadImageVideoFrameFiles(files, rowId, field) {
   const row = findImageVideoRow(rowId);
   if (!row || isImageVideoRowLocked(row)) return;
   const accepted = files.filter(file => file.type.startsWith("image/")).slice(0, 1);
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addFrameToImageVideoRow(row, field, [{
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        size: file.size,
-        createdAt: Date.now()
-      }]);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      addFrameToImageVideoRow(row, field, [asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -8366,31 +8312,16 @@ function getBatchModel() {
   return IMAGE_MODELS[defaults.model] || IMAGE_MODELS.nano;
 }
 
+
 async function uploadBatchFiles(files) {
   const accepted = files.filter(file => file.type.startsWith("image/"));
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addAssetsToBatch([{
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      }]);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      addAssetsToBatch([asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -8430,11 +8361,13 @@ async function copyBatchImages() {
   await copyImageAssets(state.batchImages);
 }
 
+
 async function uploadReferenceFiles(files, rowId) {
   const row = findMultiRow(rowId);
   if (!row || isMultiRowLocked(row)) return;
   for (const file of files) {
-    let meta = await getFileMeta(file);
+    const originalMeta = await getFileMeta(file);
+    let meta = originalMeta;
     let uploadFile = file;
     let compressedInfo = null;
     if (getMultiModel(row).prepareSeedanceReferences) {
@@ -8444,67 +8377,40 @@ async function uploadReferenceFiles(files, rowId) {
         meta = prepared.meta;
         compressedInfo = prepared.compressedInfo;
       } catch (error) {
-        window.alert(`视频自动压缩失败: ${file.name} ${error.message}`);
+        window.alert("视频自动压缩失败: " + file.name + " " + error.message);
         continue;
       }
     }
-    const form = new FormData();
-    form.append("file", uploadFile);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      addRefsToMultiRow(row, [{
-        id: uid("asset"),
-        name: uploadFile.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: uploadFile.size,
-        compressedFrom: compressedInfo,
-        createdAt: Date.now()
-      }]);
+      const asset = await uploadLocalFileAsset(file, {
+        identityMeta: originalMeta,
+        uploadFile,
+        uploadMeta: meta,
+        overrides: { compressedFrom: compressedInfo }
+      });
+      addRefsToMultiRow(row, [asset]);
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
+
 
 async function uploadViduRefFiles(files, rowId = null) {
   const row = rowId ? findViduRefRow(rowId) : null;
   if (rowId && (!row || isViduRefRowLocked(row))) return;
   const accepted = files.filter(file => file.type.startsWith("image/"));
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      const asset = {
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        size: file.size,
-        createdAt: Date.now()
-      };
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
       if (row) {
         addRefsToViduRefRow(row, [asset]);
       } else {
         addUploadHistory(asset);
       }
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
 }
@@ -8599,39 +8505,23 @@ async function pasteClipboardToViduRefRow(row) {
   }]);
 }
 
+
 async function uploadFiles(files, rowId = null, requiredType = null) {
   const row = rowId ? findRow(rowId) : null;
   if (row && isRowLocked(row)) return;
-  const accepted = files.filter(file => !requiredType || file.type.startsWith(`${requiredType}/`));
+  const accepted = files.filter(file => !requiredType || file.type.startsWith(requiredType + "/"));
   for (const file of accepted) {
-    const meta = await getFileMeta(file);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-      const json = await response.json();
-      const uploadedUrl = uploadResponseUrl(json);
-      if (!response.ok || !uploadedUrl) throw new Error(json.message || `HTTP ${response.status}`);
-      const asset = {
-        id: uid("asset"),
-        name: file.name,
-        url: uploadedUrl,
-        preview: uploadedUrl,
-        type: meta.type,
-        width: meta.width,
-        height: meta.height,
-        duration: meta.duration,
-        size: file.size,
-        createdAt: Date.now()
-      };
-      addUploadHistory(asset);
+      const meta = await getFileMeta(file);
+      const asset = await uploadLocalFileAsset(file, { identityMeta: meta });
+      const canonical = addUploadHistory(asset) || asset;
       if (row) {
         markRowDirty(row);
-        row.images = mergeAssets(row.images, [asset], getModel(row).maxImages);
+        row.images = mergeAssets(row.images, [canonical], getModel(row).maxImages);
         persistRows();
       }
     } catch (error) {
-      window.alert(`上传失败: ${file.name} ${error.message}`);
+      window.alert("上传失败: " + file.name + " " + error.message);
     }
   }
   render();
@@ -11517,14 +11407,15 @@ function canvasToBlob(canvas, type = "image/jpeg", quality = 0.92) {
   });
 }
 
+
 async function uploadGeneratedImageBlob(blob, filename) {
-  const form = new FormData();
-  form.append("file", new File([blob], filename, { type: blob.type || "image/jpeg" }));
-  const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-  const json = await response.json().catch(() => ({}));
-  const uploadedUrl = uploadResponseUrl(json);
-  if (!response.ok || !uploadedUrl) throw new Error(json.message || `上传抽帧失败 HTTP ${response.status}`);
-  return uploadedUrl;
+  const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+  const meta = await getFileMeta(file);
+  const asset = await uploadLocalFileAsset(file, {
+    identityMeta: meta,
+    overrides: { source: "video-frame" }
+  });
+  return (addUploadHistory(asset) || asset).url;
 }
 
 function waitForMediaEvent(media, eventName, timeout = 5000) {
@@ -14009,9 +13900,11 @@ function hasStagedAgentAsset(value) {
   return Object.values(value).some(hasStagedAgentAsset);
 }
 
+
 async function uploadAgentAssetFile(file, task, descriptor = {}, taskType = "") {
   let uploadFile = file;
-  let meta = await getFileMeta(file);
+  const originalMeta = await getFileMeta(file);
+  let meta = originalMeta;
   let compressedInfo = null;
   const input = agentTaskInput(task);
   const multiModel = taskType === "multiVideo" ? getMultiModel({ model: input.model || "seedance" }) : null;
@@ -14021,37 +13914,20 @@ async function uploadAgentAssetFile(file, task, descriptor = {}, taskType = "") 
     meta = prepared.meta;
     compressedInfo = prepared.compressedInfo;
   }
-  const form = new FormData();
-  form.append("file", uploadFile, uploadFile.name || descriptor.name || "agent-asset");
-  const response = await fetch(`${apiBase()}/fileupload`, { method: "POST", body: form });
-  const text = await response.text();
-  let json = {};
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    json = { message: text };
-  }
-  const uploadedUrl = uploadResponseUrl(json);
-  if (!response.ok || !uploadedUrl) throw new Error(json.message || `Agent 素材上传失败: HTTP ${response.status}`);
-  const asset = {
-    id: uid("asset"),
-    agentAssetId: descriptor.assetId || descriptor.id || "",
-    name: uploadFile.name || descriptor.name || "agent-asset",
-    url: uploadedUrl,
-    preview: uploadedUrl,
-    type: meta.type,
-    width: meta.width,
-    height: meta.height,
-    duration: meta.duration,
-    size: uploadFile.size,
-    compressedFrom: compressedInfo,
-    source: "agent",
-    origin: task.origin ? { ...task.origin } : null,
-    executedBy: { type: "browser", id: state.agentBrowserId, label: state.agentBrowserLabel },
-    createdAt: Date.now()
-  };
-  addUploadHistory(asset);
-  return asset;
+  const asset = await uploadLocalFileAsset(file, {
+    identityMeta: originalMeta,
+    uploadFile,
+    uploadMeta: meta,
+    overrides: {
+      agentAssetId: descriptor.assetId || descriptor.id || "",
+      name: descriptor.name || uploadFile.name || file.name || "agent-asset",
+      compressedFrom: compressedInfo,
+      source: "agent",
+      origin: task.origin ? { ...task.origin } : null,
+      executedBy: { type: "browser", id: state.agentBrowserId, label: state.agentBrowserLabel }
+    }
+  });
+  return addUploadHistory(asset) || asset;
 }
 
 async function resolveAgentTaskAssets(task, controls) {
