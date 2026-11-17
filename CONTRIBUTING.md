@@ -1,5 +1,7 @@
 # Contributing
 
+See [installation, synchronization, and selective contributions](docs/GIT_WORKFLOW.md) for the maintainer/Fork/PR workflow. Consumers use `sync`; it never pushes local changes. Contributors preserve changes on a topic branch, run verification, and open a PR. The maintainer chooses what to merge.
+
 Thank you for improving APIplusWebtools. This project favors small, testable changes that preserve local user data and existing provider behavior.
 
 ## Set Up

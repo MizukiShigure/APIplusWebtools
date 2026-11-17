@@ -44,6 +44,37 @@ button {
   overflow: hidden;
 }
 
+.avatar-mobile-menu { display: none; }
+@media (max-width: 760px) {
+  .app-shell.avatar-workflow-shell {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 40px minmax(0, 1fr);
+  }
+  .avatar-workflow-shell > .avatar-mobile-menu {
+    display: block;
+    grid-row: 1;
+    padding: 8px 16px;
+    text-align: left;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .avatar-workflow-shell > .sidebar { display: none; }
+  .avatar-workflow-shell > .workspace { grid-row: 2; }
+  .avatar-workflow-shell.avatar-menu-open > .sidebar {
+    display: grid;
+    position: absolute;
+    z-index: 100;
+    top: 40px;
+    left: 0;
+    width: min(320px, calc(100% - 24px));
+    height: calc(100% - 40px);
+    box-shadow: var(--shadow);
+  }
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -2195,6 +2226,10 @@ input:disabled {
   gap: 10px;
 }
 
+.batch-default-grid > [hidden] {
+  display: none;
+}
+
 .batch-image-defaults {
   display: grid;
   gap: 8px;
@@ -2342,6 +2377,19 @@ input:disabled {
 .history-video-overlay.open {
   display: grid;
   place-items: center;
+}
+
+.history-video-overlay .ghost-button {
+  color: #edf2f5;
+  border-color: #82919b;
+}
+
+.history-video-overlay .ghost-button:hover:not(:disabled) {
+  background: #26323a;
+}
+
+.history-video-overlay .ghost-button.danger {
+  color: #ffaaa7;
 }
 
 .history-video-viewer {
@@ -2515,7 +2563,14 @@ input:disabled {
   }
 }
 
+#assetDialog {
+  max-width: calc(100vw - 30px);
+  max-height: calc(100dvh - 30px);
+  overflow: hidden;
+}
+
 #assetDialog .modal-panel {
+  height: min(760px, calc(100dvh - 30px));
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
@@ -2527,22 +2582,70 @@ input:disabled {
   gap: 12px;
   margin: -16px -16px 0;
   padding: 16px;
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 4;
+}
+
+.asset-dialog-toolbar .modal-head h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.asset-dialog-toolbar .modal-head .ghost-button {
+  flex-shrink: 0;
+}
+
+#assetDialogPages {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#assetDialogPages:empty {
+  display: none;
 }
 
 .asset-dialog-grid {
   align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
+  /* Auto row minima collapse to card padding inside the constrained scroller. */
+  grid-auto-rows: max-content;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 4px;
 }
 
 .asset-dialog-grid .asset-card {
+  /* Pagination bounds the DOM; intrinsic placeholders would move these rows. */
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+  grid-template-rows: 120px auto auto auto;
+  align-content: start;
   cursor: pointer;
   position: relative;
   text-align: left;
+}
+
+.asset-dialog-grid .asset-card > img,
+.asset-dialog-grid .asset-card > video {
+  width: 100%;
+  height: 120px;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
+.asset-dialog-grid .asset-card > audio {
+  align-self: center;
+}
+
+.asset-dialog-grid .asset-card > .meta-line {
+  overflow-wrap: anywhere;
 }
 
 .asset-dialog-grid .asset-card:focus-visible {
@@ -2560,4 +2663,23 @@ input:disabled {
 .asset-dialog-grid .asset-card > strong {
   overflow-wrap: anywhere;
   padding-right: 34px;
+}
+
+.history-audit-details {
+  margin: 8px 0;
+  border: 1px solid #dce5e8;
+  border-radius: 8px;
+  background: #f8fafb;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.history-audit-details summary { cursor: pointer; font-size: 12px; color: #45616a; }
+.history-audit-details pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 10px 0 0;
 }

@@ -7,6 +7,9 @@
 
   const TASK_TYPE_ALIASES = {
     image: "image",
+    audio: "audio",
+    audio_generation: "audio",
+    "audio-generation": "audio",
     image_generation: "image",
     "image-generation": "image",
     imagevideo: "imageVideo",
@@ -26,6 +29,7 @@
   };
 
   const TASK_LABELS = {
+    audio: "Audio generation",
     image: "Image generation",
     imageVideo: "Image to video",
     motion: "Motion imitation",
@@ -56,6 +60,7 @@
   }
 
   function modelMedia(taskType, config) {
+    if (taskType === "audio") return clone(config.media || { refs: ["audio", "image", "video"] });
     if (taskType === "image") {
       return { images: true, maxImages: Number(config.maxImages || 0) || null };
     }
@@ -82,11 +87,22 @@
       sizes: copyChoiceArray(config.sizes),
       qualities: copyChoiceArray(config.qualities),
       durations: copyChoiceArray(config.durations),
+      renderQualities: copyChoiceArray(config.renderQualities),
+      backgrounds: copyChoiceArray(config.backgrounds),
+      outputFormats: copyChoiceArray(config.outputFormats),
+      fields: clone(config.fields || []),
       defaults: {
         version: config.defaultVersion || config.versions?.[0]?.value || "",
         size: config.defaultSize ?? config.sizes?.[0] ?? "",
         quality: config.defaultQuality ?? config.qualities?.[0] ?? "",
-        duration: String(config.defaultDuration ?? config.durations?.[0] ?? "")
+        duration: String(config.defaultDuration ?? config.durations?.[0] ?? ""),
+        renderQuality: config.defaultRenderQuality,
+        background: config.defaultBackground,
+        outputFormat: config.defaultOutputFormat,
+        frameSize: config.defaultFrameSize,
+        frameCount: config.defaultFrameCount,
+        frameDurationMs: config.defaultFrameDurationMs,
+        ...clone(config.defaults || {})
       },
       media: modelMedia(taskType, config),
       cancellation: config.cancelEndpoint || config.cancelEndpoints || config.cancelEndpointCandidates
@@ -99,7 +115,7 @@
     const catalogs = options.catalogs || {};
     const enabled = Array.isArray(options.enabledTaskTypes)
       ? options.enabledTaskTypes.map(normalizeTaskType)
-      : ["image", "imageVideo", "motion", "multiVideo", "avatar"];
+      : ["image", "imageVideo", "motion", "multiVideo", "avatar", "audio"];
     return {
       contractVersion: 1,
       execution: "browser-worker",
@@ -194,7 +210,15 @@
       duration: duration === undefined || duration === null ? undefined : String(duration),
       count: Math.max(1, Number(input.count || options.count || 1)),
       generateAudio: options.generateAudio ?? input.generateAudio,
+      renderQuality: options.renderQuality ?? input.renderQuality,
+      background: options.background ?? input.background,
+      outputFormat: options.outputFormat ?? input.outputFormat,
+      frameSize: options.frameSize ?? input.frameSize,
+      frameCount: options.frameCount ?? input.frameCount,
+      frameDurationMs: options.frameDurationMs ?? input.frameDurationMs,
       autoMultiShot: Boolean(options.autoMultiShot ?? input.autoMultiShot),
+      klingMode: options.klingMode ?? input.klingMode,
+      klingKeepVideoSound: options.klingKeepVideoSound ?? input.klingKeepVideoSound,
       mode: options.mode ?? input.mode
     };
   }
@@ -212,7 +236,10 @@
     const input = mergedEnvelope(task);
     const assets = context.assets || input.assets || {};
     const row = baseRow(task, input, context);
-    if (taskType === "image") {
+    if (taskType === "audio") {
+      Object.assign(row, clone(input.options || {}));
+      row.refs = normalizeAssetList(assets.refs || assets.references || assets.items);
+    } else if (taskType === "image") {
       row.images = normalizeAssetList(assets.images || assets.referenceImages || assets.refs)
         .filter(asset => asset.type === "image");
     } else if (taskType === "imageVideo") {

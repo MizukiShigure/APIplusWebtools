@@ -1,0 +1,14 @@
+const assert = require('node:assert/strict');
+const api = require('./agent-task-adapter.js');
+assert.equal(api.normalizeTaskType('audio-generation'), 'audio');
+const input = {model:'seedAudio',prompt:'Speak clearly',options:{speech_rate:20,klingMode:'video_edit',klingKeepVideoSound:false},assets:{refs:[{url:'https://example.com/a.wav',type:'audio'}]}};
+const audio = api.createRowSeed({taskType:'audio',input});
+assert.equal(audio.row.speech_rate,20);
+assert.equal(audio.row.refs[0].url,input.assets.refs[0].url);
+const kling = api.createRowSeed({taskType:'multiVideo',input:{...input,model:'kling3Omni'}});
+assert.equal(kling.row.klingMode,'video_edit');
+assert.equal(kling.row.klingKeepVideoSound,false);
+const caps = api.buildCapabilityManifest({catalogs:{audio:{seedAudio:{label:'Seed Audio',fields:[{key:'speech_rate',type:'number'}],defaults:{speech_rate:0},media:{refs:['audio','image']}}}}});
+assert.equal(caps.taskFamilies[0].id,'audio');
+assert.equal(caps.taskFamilies[0].models[0].fields[0].key,'speech_rate');
+console.log('Agent audio / video editing adapter checks passed');

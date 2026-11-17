@@ -27,6 +27,11 @@ assert.match(allText, /API_PLUS_AGENT_TOKEN/);
 assert.match(allText, /waiting_for_worker/);
 assert.match(allText, /browser worker|browser-worker|browser tab/i);
 assert.match(allText, /capabilities/);
+assert.match(skill, /no open browser tab or local Agent token setup is required/i);
+assert.match(skill, /recreate/);
+assert.match(skill, /source path, hash/i);
+assert.equal(fs.existsSync(path.join(skillDir, 'scripts/run-workbench.ps1')), true);
+assert.equal(fs.existsSync(path.join(skillDir, 'references/portable-setup.md')), true);
 
 for (const command of ["capabilities", "upload", "submit", "status", "wait", "cancel"]) {
   assert.match(clientSource, new RegExp(`\\b${command}\\b`), `client must implement ${command}`);
@@ -82,6 +87,27 @@ for (const command of ["capabilities", "upload", "submit", "status", "wait", "ca
     label: "Minimax Code workstation"
   });
 
+  const os = require('node:os');
+  const video = path.join(os.tmpdir(), `avatar-upload-test-${process.pid}.mp4`);
+  const originalFetch=global.fetch, originalWrite=process.stdout.write;
+  let uploadedPath='', uploadedType='';
+  try {
+    fs.writeFileSync(video,Buffer.from('synthetic-video-fixture'));
+    global.fetch=async (url,options)=>{
+      if (new URL(url).pathname.endsWith('/capabilities')) return new Response(JSON.stringify({success:true,taskTypes:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+      uploadedPath=new URL(url).pathname;
+      uploadedType=options.body.get('file').type;
+      return new Response(JSON.stringify({success:true,url:'/api/control/v1/avatar-workflow/media/example.mp4'}),{status:200,headers:{'Content-Type':'application/json'}});
+    };
+    process.stdout.write=()=>true;
+    const code=await client.main(['avatar-upload',video],{API_PLUS_AGENT_TOKEN:'example-token'});
+    assert.equal(code,0,'independent subtitle input accepts a video upload');
+    assert.equal(uploadedPath,'/api/agent/v1/avatar-workflow/media');
+    assert.equal(uploadedType,'video/mp4');
+  } finally {
+    global.fetch=originalFetch;process.stdout.write=originalWrite;
+    fs.rmSync(video,{force:true});
+  }
   console.log("agent-skill-package.test.cjs: ok");
 })().catch(error => {
   console.error(error);

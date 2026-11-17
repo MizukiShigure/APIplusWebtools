@@ -106,6 +106,7 @@
     const label = String(options.label || workerId);
     const heartbeatMs = Math.max(1000, Number(options.heartbeatMs || 10000));
     const claimMs = Math.max(250, Number(options.claimMs || 1500));
+    const now = options.now || (() => Date.now());
     const setTimer = options.setTimeoutFn || setTimeout;
     const clearTimer = options.clearTimeoutFn || clearTimeout;
     const lease = typeof options.acquirePageLease === "function"
@@ -128,6 +129,7 @@
     };
     let timer = 0;
     let runningCycle = false;
+    let nextHeartbeatAt = 0;
 
     function publish() {
       if (typeof options.onStatus === "function") options.onStatus(clone(state));
@@ -169,6 +171,7 @@
     }
 
     function setDisconnected(error) {
+      nextHeartbeatAt = 0;
       state.connection = "offline";
       state.reconnectAttempt += 1;
       state.lastError = String(error?.message || error || "Connection failed");
@@ -210,7 +213,22 @@
         body: { workerId, label, capabilities: await options.getCapabilities() }
       });
       state.leaseMs = Number(registered.leaseMs || state.leaseMs);
+      nextHeartbeatAt = 0;
       return registered;
+    }
+
+    function heartbeatInterval() {
+      return Math.min(heartbeatMs, state.leaseMs / 3);
+    }
+
+    async function workerRequest(path) {
+      try {
+        return await request(path, { method: "POST", body: { workerId } });
+      } catch (error) {
+        if (![401, 404].includes(Number(error?.status))) throw error;
+        await registerWorker();
+        return request(path, { method: "POST", body: { workerId } });
+      }
     }
 
     async function runOnce() {
@@ -219,23 +237,28 @@
       try {
         state.active = Boolean(await lease.renew());
         if (!state.active) {
+          nextHeartbeatAt = 0;
           state.connection = "standby";
           publish();
           return null;
         }
-        let heartbeat;
-        try {
-          heartbeat = await request("/worker/heartbeat", { method: "POST", body: { workerId } });
-        } catch (error) {
-          if (![401, 404].includes(Number(error?.status))) throw error;
-          await registerWorker();
-          heartbeat = await request("/worker/heartbeat", { method: "POST", body: { workerId } });
+        const canceledThisCycle = new Set();
+        async function forwardCancellations(response) {
+          for (const taskId of response.cancelTaskIds || []) {
+            const id = String(taskId);
+            if (canceledThisCycle.has(id)) continue;
+            if (typeof options.cancelTask === "function") await options.cancelTask(id);
+            canceledThisCycle.add(id);
+          }
         }
-        state.lastHeartbeatAt = Date.now();
-        for (const taskId of heartbeat.cancelTaskIds || []) {
-          if (typeof options.cancelTask === "function") await options.cancelTask(String(taskId));
+        if (now() >= nextHeartbeatAt) {
+          const heartbeat = await workerRequest("/worker/heartbeat");
+          state.lastHeartbeatAt = now();
+          nextHeartbeatAt = state.lastHeartbeatAt + heartbeatInterval();
+          await forwardCancellations(heartbeat);
         }
-        const claimed = await request("/worker/claim", { method: "POST", body: { workerId } });
+        const claimed = await workerRequest("/worker/claim");
+        await forwardCancellations(claimed);
         setConnected();
         if (!claimed.task) return null;
         const task = claimed.task;
@@ -269,7 +292,7 @@
       timer = setTimer(async () => {
         try {
           await runOnce();
-          schedule(claimMs);
+          schedule(Math.min(claimMs, heartbeatInterval()));
         } catch {
           schedule(reconnectDelay(state.reconnectAttempt - 1));
         }
@@ -323,4 +346,3 @@
     normalizeWorkerReport
   };
 });
-

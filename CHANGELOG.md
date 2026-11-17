@@ -1,5 +1,65 @@
 # Changelog
 
+## v2026.11.18-git-agent-sync.1
+
+- Added clone-to-Agent setup with a private Windows Node runtime bootstrap, stable local configuration, and a managed Skill that follows the selected checkout.
+- Added safe Git synchronization: main-only fast-forward, local-edit/divergence/active-task checks, private data backup, owned service restart, and Skill refresh.
+- Added contributor Fork/branch/PR instructions, maintainer selection workflow, Windows CI, and an allowlist check before publication.
+- Published the accumulated browser/headless media, shared history, audio and avatar workflow updates below. Provider availability remains separate from local/mock verification.
+
+## v2026.10.23-headless-audio-kling.1
+
+- Added local background Agent execution and automatic hidden service startup. Supported media tasks no longer require an open browser or manual local token setup.
+- Persisted Agent upload identity, task inputs, prompts/options, upstream IDs, progress, and results for shared history inspection and deliberate reruns.
+- Repaired Kling source-video editing controls and added model-specific sound inputs through the company gateway; route availability and live channel capacity are reported separately.
+- Added a portable skill containing a clean Windows workbench/runtime archive and a lightweight skill for the existing local installation. Updated setup, API, data, and release guides.
+
+## Unreleased
+
+- Added GPT Image 2.6 Flare/Sunburst and MiniMax H3 Image to the shared browser/headless model catalog. GPT 2.6 supports PNG, SVG and GIF with format-specific validation and GIF frame controls; H3 Image supports 1K/2K/4K and up to eight reference images.
+- Preserved new image format/frame settings through batch defaults, copy, refresh recovery, history grouping and recreation. SVG rejects reference images without silently deleting existing assets.
+
+- Added voice selection preferences (preferred languages and usage requirements) with automatic pending/annotated labels; existing notes, tags, provider IDs and image bindings remain intact, including version-conflict draft recovery.
+
+- Guarded preview fullscreen against late requests, stale exit events and invalid records; dragging from the viewer onto its backdrop no longer closes it.
+- Kept the selected video time during frame capture without reloading, canceled stale frame reads on preview switches, and restored retry controls after upload errors.
+- Added isolated browser coverage for fullscreen races and frame uploads, plus frame-read cancellation and timeout regressions.
+- Reduced repeated history grouping work with render-scoped derivations; paged expanded result groups without removing records.
+- Released offscreen/detached video previews and full-viewer resources on close; retained grouped navigation and improved preview control contrast.
+- Retried transient Windows EPERM atomic commits with bounded backoff, preserving committed bytes and avoiding transaction/provider replay.
+- Added isolated browser load/preview tests and deterministic Windows storage-lock regressions.
+- Removed the subject library, legacy avatar, Vidu voice/reference, music and video-edit entries from task navigation; kept the dedicated avatar workflow, existing queues, history and model adapters unchanged.
+- Split avatar production into three large subpage tabs: speech, digital human, and subtitles. Album, voices, workflows and settings are compact header tabs above production navigation; spacing and active states are consistent, drafts/results survive navigation, and handoff opens its target tab without submitting.
+- Added operation-scoped server/Agent jobs and explicit result handoff without automatic submission; retained legacy pipeline recovery.
+- Added local audio/video subtitle inputs, per-section previews/status, editable subtitle download, and desktop/mobile layout tests.
+
+## v2026.09.20-avatar-workflow.1
+
+- Integrated speech, audio adjustment, digital-human generation and optional subtitles into a native page on the existing 4198 service.
+- Added a shared versioned voice/workflow library, local image album, SHA-256 deduplication, and manual voice-image recommendations/defaults.
+- Added server-executed, persistent Agent workflow jobs and shared history provenance; existing remote task IDs resume without duplicate submission.
+- Moved RunningHub configuration to shared local storage with redacted key responses and conflict detection; legacy imports preserve private backups and leave the old tool untouched.
+- Added browser, store, adapter, authorization and restart regression tests, plus Agent instructions and portable source entries.
+
+## v2026.09.18-portable-runtime.1
+
+- Added a Windows x64 self-contained build with an explicit Node runtime, license, and integrity manifest; source-only builds remain supported.
+- Portable launchers now prefer the bundled runtime, bypass global PM2 by default, and keep background process logs in the selected data directory.
+- Added recipient deployment, upgrade/backup, and Agent setup guides; preserved the company gateway without distributing personal state or credentials.
+- Fixed Seedance 2.5 automatic duration: both video pages now offer automatic (-1), submit numeric -1, and retain the selection through reload and history reuse. New rows still default to 10 seconds; reference-clip duration validation is unchanged.
+
+## v2026.09.14-models-prompts.1
+
+- Added company-gateway Seedance 2.5 to image/video and multimodal pages, plus GPT Image 2.5 Flare and Sunburst with independent render-quality and background controls.
+- Added per-task prompt history, favorites, search, and row reuse with IndexedDB retry storage and safe local-service synchronization.
+- Fixed asset-picker overlapping grid rows, added 50-item paging, and deferred offscreen video poster loading.
+- Kept reference insertion at the selected caret in both prompt editors; avoided full-page rebuilding on prompt blur and batched typing saves.
+- Reduced background Agent polling cost with targeted task reads, correctly spaced heartbeats, and batched lease snapshots.
+- Included updated source, engineering notes, and regression tests in the privacy-clean portable package.
+
+- New rows now appear at the top across manual creation, batch imports, history reuse, and Agent submissions while copied rows remain beside their source row.
+- Updated Midjourney image generation with V8.2 as the default and added V8.1 while retaining V7, V6.1, and Niji 7 compatibility.
+
 ## v2026.08.03-asset-picker.1
 
 - Added independent favorites and a favorites-only filter to the upload-asset picker.

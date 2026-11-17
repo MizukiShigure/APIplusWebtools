@@ -146,6 +146,6 @@ assert.match(
   cssSource,
   /@media \(max-width: 820px\)[\s\S]*?\.history-video-overlay \.history-video-viewer-head\s*\{[\s\S]*?grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/
 );
-assert.match(pageSource, /app\.js\?v=release-20260803-asset-picker-favorites-dedup/);
+assert.match(pageSource, /app\.js\?v=update-20261115-image-models/);
 
 console.log("history viewer group navigation checks passed");

@@ -1,0 +1,26 @@
+const assert = require('node:assert/strict');
+const {createClient} = require('./workbench-browser-client.js');
+(async()=>{
+  const calls=[];
+  const client=createClient({controlAuth:async()=>({token:'example-session-token'}),origin:()=>({type:'browser',client:'browser',id:'b1',label:'Web'}),apiBase:()=> 'https://gateway.example/api',fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({task:{taskId:'task1',state:'queued'}})};}});
+  const task=await client.submitTask({clientTaskId:'same-request',taskType:'audio',input:{model:'suno',prompt:'Piano'}});
+  assert.equal(task.taskId,'task1');
+  const body=JSON.parse(calls[0].options.body);
+  assert.equal(body.origin.id,'b1');
+  assert.equal(body.clientTaskId,'same-request');
+  assert.equal(body.input.prompt,'Piano');
+  assert.equal(body.input.options.apiBase,'https://gateway.example/api');
+  await client.getTask('task/1');
+  assert.equal(calls[1].url,'/api/agent/v1/tasks/task%2F1');
+  await client.cancelTask('task1');
+  assert.equal(calls[2].options.method,'POST');
+  assert.equal(calls[0].options.credentials,'same-origin');
+  assert.equal(calls[0].options.headers.Authorization,'Bearer ' + 'example-session-token');
+  const rejected=createClient({controlAuth:async()=>({token:'example-session-token'}),fetch:async()=>({ok:false,status:400,json:async()=>({error:{message:'Invalid audio input'}})})});
+  await assert.rejects(rejected.getTask('bad-input'), error=>error.message==='Invalid audio input' && error.definite===true && error.statusCode===400);
+  const uncertain=createClient({controlAuth:async()=>({token:'example-session-token'}),fetch:async()=>({ok:false,status:500,json:async()=>({error:{message:'Unexpected failure'}})})});
+  await assert.rejects(uncertain.getTask('unknown'), error=>error.definite===false);
+  const noAuth=createClient({controlAuth:async()=>({}),fetch:async()=>{throw new Error('must not send');}});
+  await assert.rejects(noAuth.getTask('not-sent'), error=>error.definite===true);
+  console.log('Browser background task bridge checks passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

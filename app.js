@@ -13,6 +13,8 @@ const HISTORY_ORIGIN_UTILS = globalThis.ApiBatchHistoryOriginUtils;
 const ASSET_HISTORY_UTILS = globalThis.AssetHistoryUtils;
 const AGENT_TASK_ADAPTER = globalThis.ApiBatchAgentTaskAdapter;
 const AGENT_RUNTIME = globalThis.ApiBatchAgentRuntime;
+let audioWorkbenchController = null;
+let audioAssetPickerResolve = null;
 const { insertPromptToken } = PROMPT_DETAIL_UTILS;
 const PROMPT_DETAIL_SAVE_DELAY_MS = 180;
 const PROMPT_DETAIL_TOKEN_MIME = "application/x-api-prompt-token";
@@ -21,6 +23,8 @@ const {
   KLING_3_OMNI,
   MINIMAX_H3,
   SEEDANCE_2,
+  SEEDANCE_25,
+  GPT_IMAGE_25,
   buildSeedance2FirstLastPayload,
   formatProviderError,
   nearestQualityOption,
@@ -199,6 +203,8 @@ const IMAGE_MODELS = {
     queryEndpoint: "/midjourney_query",
     async: true,
     versions: [
+      { label: "V8.2", value: "8.2" },
+      { label: "V8.1", value: "8.1" },
       { label: "V7", value: "7" },
       { label: "V6.1", value: "6.1" },
       { label: "Niji 7", value: "niji_7" }
@@ -256,6 +262,29 @@ const IMAGE_MODELS = {
       };
     }
   },
+  gpt26: {
+    ...MODEL_CONTRACTS.GPT_IMAGE_26,
+    label: "GPT Image 2.6",
+    async: true,
+    requiresPrompt: false,
+    validate: MODEL_CONTRACTS.validateGptImage26Row,
+    build: MODEL_CONTRACTS.buildGptImage26Payload
+  },
+  minimaxH3Image: {
+    ...MODEL_CONTRACTS.MINIMAX_H3_IMAGE,
+    label: "MiniMax H3 Image",
+    async: true,
+    validate: MODEL_CONTRACTS.validateMiniMaxH3ImageRow,
+    build: MODEL_CONTRACTS.buildMiniMaxH3ImagePayload
+  },
+  gpt25: {
+    ...GPT_IMAGE_25,
+    label: "GPT Image 2.5",
+    async: true,
+    requiresPrompt: false,
+    validate: MODEL_CONTRACTS.validateGptImage25Row,
+    build: MODEL_CONTRACTS.buildGptImage25Payload
+  },
   gpt: {
     label: "GPT Image",
     endpoint: "/gen_img_4o",
@@ -311,6 +340,7 @@ const IMAGE_VIDEO_MODELS = {
     sizes: ["16:9", "9:16"],
     qualities: ["768P", "1080P"],
     durations: ["6", "10"],
+    defaultDuration: "10",
     supportsTextOnly: true,
     supportsFirstFrame: true,
     supportsLastFrame(version) {
@@ -405,6 +435,8 @@ const IMAGE_VIDEO_MODELS = {
     sizes: ["16:9", "9:16", "1:1"],
     qualities: ["std", "pro"],
     durations: Array.from({ length: 13 }, (_, index) => String(index + 3)),
+    defaultQuality: "pro",
+    defaultDuration: "10",
     supportsTextOnly: true,
     supportsFirstFrame: true,
     supportsLastFrame: true,
@@ -457,6 +489,18 @@ const IMAGE_VIDEO_MODELS = {
       };
     }
   },
+  seedance25: {
+    ...SEEDANCE_25,
+    label: "Seedance 2.5",
+    async: true,
+    versions: [{ label: "Seedance 2.5", value: SEEDANCE_25.version }],
+    supportsTextOnly: true,
+    supportsFirstFrame: true,
+    supportsLastFrame: true,
+    supportsGenerateAudio: true,
+    validate: MODEL_CONTRACTS.validateSeedance25FirstLastRow,
+    build: MODEL_CONTRACTS.buildSeedance25FirstLastPayload
+  },
   seedance2: {
     label: "Seedance 2.0",
     endpoint: SEEDANCE_2.endpoint,
@@ -469,6 +513,8 @@ const IMAGE_VIDEO_MODELS = {
       return seedance2QualityOptions(row.version);
     },
     durations: SEEDANCE_2.durations,
+    defaultQuality: SEEDANCE_2.defaultQuality,
+    defaultDuration: SEEDANCE_2.defaultDuration,
     supportsTextOnly: true,
     supportsFirstFrame: true,
     supportsLastFrame: true,
@@ -555,6 +601,15 @@ const IMAGE_VIDEO_MODELS = {
 };
 
 const MULTI_VIDEO_MODELS = {
+  seedance25: {
+    ...SEEDANCE_25,
+    label: "Seedance 2.5",
+    async: true,
+    versions: [{ label: "Seedance 2.5", value: SEEDANCE_25.version }],
+    supportsGenerateAudio: true,
+    validate: MODEL_CONTRACTS.validateSeedance25MultiRow,
+    build: MODEL_CONTRACTS.buildSeedance25MultiPayload
+  },
   seedance: {
     label: "Seedance 2.0",
     endpoint: "/seedance2",
@@ -569,8 +624,9 @@ const MULTI_VIDEO_MODELS = {
     qualitiesFor(row) {
       return seedance2QualityOptions(row.version);
     },
-    defaultDuration: "5",
-    durations: Array.from({ length: 12 }, (_, index) => String(index + 4)),
+    defaultQuality: SEEDANCE_2.defaultQuality,
+    defaultDuration: SEEDANCE_2.defaultDuration,
+    durations: SEEDANCE_2.durations,
     maxRefs: 10,
     prepareSeedanceReferences: true,
     validate() {
@@ -612,6 +668,8 @@ const MULTI_VIDEO_MODELS = {
     sizes: KLING_3_OMNI.sizes,
     qualities: KLING_3_OMNI.qualities,
     durations: KLING_3_OMNI.durations,
+    defaultQuality: KLING_3_OMNI.defaultQuality,
+    defaultDuration: KLING_3_OMNI.defaultDuration,
     maxRefs: 10,
     validate(row) {
       return MODEL_CONTRACTS.validateKling3OmniRow(row);
@@ -718,6 +776,7 @@ const MOTION_MODELS = {
     ],
     sizes: ["16:9", "9:16", "1:1"],
     qualities: ["std", "pro"],
+    defaultQuality: "pro",
     build(row) {
       const imageUrl = assetUrl(row.image);
       const videoUrl = assetUrl(row.video);
@@ -984,16 +1043,18 @@ const SUBJECT_TYPES = [
 ];
 
 const TASK_PAGES = [
-  { id: "subjectLibrary", label: "主体库", ready: true },
-  { id: "viduVoice", label: "Vidu声音克隆", ready: true },
-  { id: "viduRef", label: "Vidu参考生视频", ready: true },
-  { id: "avatar", label: "数字人", ready: true },
+  { id: "subjectLibrary", label: "主体库", ready: true, hidden: true },
+  { id: "viduVoice", label: "Vidu声音克隆", ready: true, hidden: true },
+  { id: "viduRef", label: "Vidu参考生视频", ready: true, hidden: true },
+  { id: "avatar", label: "数字人", ready: true, hidden: true },
+  { id: "avatarWorkflow", label: "数字人工作流", ready: true },
   { id: "image", label: "生图", ready: true },
   { id: "imageVideo", label: "图文生视频", ready: false },
   { id: "motion", label: "动作模仿", ready: false },
-  { id: "videoEdit", label: "视频编辑", ready: false },
+  { id: "videoEdit", label: "视频编辑", ready: false, hidden: true },
   { id: "multiVideo", label: "多模态生视频", ready: false },
-  { id: "music", label: "音乐生成", ready: false },
+  { id: "audio", label: "声音生成", ready: true },
+  { id: "music", label: "音乐生成", ready: false, hidden: true },
   { id: "history", label: "历史缓存池", ready: true }
 ];
 
@@ -1026,7 +1087,7 @@ TASK_PAGES.forEach(page => {
 });
 
 const state = {
-  activePage: localStorage.getItem(STORAGE_KEYS.activePage) || "image",
+  activePage: new URLSearchParams(location.search).get("page") === "avatarWorkflow" ? "avatarWorkflow" : localStorage.getItem(STORAGE_KEYS.activePage) || "image",
   rows: normalizeRows(loadJson(STORAGE_KEYS.imageRows, null)),
   imageVideoRows: normalizeImageVideoRows(loadJson(STORAGE_KEYS.imageVideoRows, null)),
   motionRows: normalizeMotionRows(loadJson(STORAGE_KEYS.motionRows, null)),
@@ -1070,6 +1131,7 @@ const state = {
   copiedRefs: [],
   choosingRowId: null,
   assetFilter: "image",
+  assetPage: 1,
   assetFavoritesOnly: localStorage.getItem(STORAGE_KEYS.assetFavoritesOnly) === "1",
   historyTab: ["uploads", "generations"].includes(localStorage.getItem(STORAGE_KEYS.historyTab)) ? localStorage.getItem(STORAGE_KEYS.historyTab) : "uploads",
   historyType: HISTORY_TYPES.includes(localStorage.getItem(STORAGE_KEYS.historyType)) ? localStorage.getItem(STORAGE_KEYS.historyType) : "image",
@@ -1080,6 +1142,7 @@ const state = {
   historyFavoritesOnly: localStorage.getItem(STORAGE_KEYS.historyFavoritesOnly) === "1",
   historyPage: 1,
   historyOpenGenerationGroup: "",
+  historyGroupResultPage: 1,
   selectedUploadIds: new Set(),
   selectedGenerationIds: new Set(),
   batchImages: [],
@@ -1105,6 +1168,15 @@ const agentTaskControls = new Map();
 const agentReportSignatures = new Map();
 
 const app = document.querySelector("#app");
+let promptLibraryClient = null;
+let promptLibraryPanel = null;
+app.addEventListener("click", event => {
+  const button = event.target.closest(".open-prompt-library");
+  if (!button) return;
+  const binding = { image: state.rows, imageVideo: state.imageVideoRows, multiVideo: state.multiRows, motion: state.motionRows, avatar: state.avatarRows, viduRef: state.viduRefRows };
+  const row = (binding[state.activePage] || []).find(item => findRenderedTaskRow(item)?.contains(button));
+  if (row) openPromptLibrary(createPromptDetailContext(row, state.activePage === "multiVideo" ? "multi" : state.activePage));
+});
 app.addEventListener("click", event => {
   const copyButton = event.target.closest(".copy-row-error");
   if (!copyButton || !app.contains(copyButton)) return;
@@ -1112,6 +1184,20 @@ app.addEventListener("click", event => {
 });
 const assetDialog = document.querySelector("#assetDialog");
 const assetDialogGrid = document.querySelector("#assetDialogGrid");
+assetDialog.addEventListener("close", () => {
+  if (audioAssetPickerResolve) {
+    audioAssetPickerResolve(null);
+    audioAssetPickerResolve = null;
+  }
+  releasePreviewMedia(assetDialogGrid);
+  assetDialogGrid.querySelectorAll("audio").forEach(media => {
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+  });
+  assetDialogGrid.replaceChildren();
+  activateVisibleMedia(app);
+});
 const pasteDialog = document.querySelector("#pasteDialog");
 const pasteText = document.querySelector("#pasteText");
 const confirmPasteBtn = document.querySelector("#confirmPasteBtn");
@@ -1119,6 +1205,12 @@ const batchModel = document.querySelector("#batchModel");
 const batchVersion = document.querySelector("#batchVersion");
 const batchSize = document.querySelector("#batchSize");
 const batchQuality = document.querySelector("#batchQuality");
+const batchRenderQuality = document.querySelector("#batchRenderQuality");
+const batchBackground = document.querySelector("#batchBackground");
+const batchOutputFormat = document.querySelector("#batchOutputFormat");
+const batchFrameSize = document.querySelector("#batchFrameSize");
+const batchFrameCount = document.querySelector("#batchFrameCount");
+const batchFrameDurationMs = document.querySelector("#batchFrameDurationMs");
 const batchCount = document.querySelector("#batchCount");
 const batchImageDrop = document.querySelector("#batchImageDrop");
 const batchChooseAssets = document.querySelector("#batchChooseAssets");
@@ -1166,7 +1258,7 @@ function normalizeRunningHubMotionSettings(value) {
     const activeId = safeConfigs.some(item => item.id === value.activeId) ? value.activeId : safeConfigs[0].id;
     const apiKey = String(value.apiKey || safeConfigs.find(item => item.apiKey)?.apiKey || "");
     safeConfigs.forEach(item => { delete item.apiKey; });
-    return { apiKey, activeId, configs: safeConfigs };
+    return { ...value, apiKey, activeId, configs: safeConfigs };
   }
   const migrated = normalizeRunningHubMotionConfig(value);
   const apiKey = String(value?.apiKey || "");
@@ -1263,13 +1355,47 @@ function runningHubMotionConfig() {
   return settings.configs.find(item => item.id === settings.activeId) || settings.configs[0];
 }
 
-function runningHubMotionApiKey() {
-  return String(runningHubMotionSettings().apiKey || "");
+function runningHubMotionApiKey(config = runningHubMotionConfig()) {
+  const settings = runningHubMotionSettings();
+  return String(settings.apiKey || (config?.hasApiKey || settings.hasApiKey ? `@shared:${config?.id || "global"}` : ""));
 }
 
+let runningHubSharedClient = null;
 function persistRunningHubMotionConfig() {
   state.runningHubMotionConfig = normalizeRunningHubMotionSettings(state.runningHubMotionConfig);
-  saveJson(STORAGE_KEYS.runningHubMotionConfig, state.runningHubMotionConfig);
+  saveJson(STORAGE_KEYS.runningHubMotionConfig, { ...state.runningHubMotionConfig, apiKey: runningHubSharedClient ? "" : state.runningHubMotionConfig.apiKey });
+  runningHubSharedClient?.save(state.runningHubMotionConfig);
+}
+
+async function initializeSharedRunningHub() {
+  if (!window.RunningHubShared) return;
+  runningHubSharedClient = window.RunningHubShared.create({
+    session: ensureControlSession,
+    onChange(value) {
+      state.runningHubMotionConfig = normalizeRunningHubMotionSettings(value);
+      saveJson(STORAGE_KEYS.runningHubMotionConfig, state.runningHubMotionConfig);
+    },
+    onError(error) {
+      state.runningHubMotionConfigMessage = error.status === 409
+        ? "另一端修改了配置。本次输入仍保留，请刷新并核对后再保存。"
+        : `共享配置尚未保存：${error.message}`;
+      window.alert(state.runningHubMotionConfigMessage);
+    }
+  });
+  try {
+    const value = await runningHubSharedClient.load(runningHubMotionSettings());
+    state.runningHubMotionConfig = normalizeRunningHubMotionSettings(value);
+    saveJson(STORAGE_KEYS.runningHubMotionConfig, state.runningHubMotionConfig);
+  } catch (error) {
+    console.warn("Shared RunningHub configuration unavailable; local configuration retained", error);
+  }
+  window.addEventListener("focus", async () => {
+    if (state.runningHubMotionConfigOpen || runningHubSharedClient.pending) return;
+    try {
+      const value = await runningHubSharedClient.refresh(runningHubMotionSettings().activeId);
+      if (value) state.runningHubMotionConfig = normalizeRunningHubMotionSettings(value);
+    } catch (error) { console.warn("Shared RunningHub refresh failed", error); }
+  });
 }
 
 function saveJson(key, value) {
@@ -1333,6 +1459,7 @@ async function writeHistoryDb(key, value) {
 async function readLocalHistoryBackup() {
   if (location.protocol === "file:") return { uploadHistory: [], generationHistory: [] };
   try {
+    if (!(await ensureControlSession())) return { uploadHistory: [], generationHistory: [] };
     const response = await fetch(`${LOCAL_HISTORY_BACKUP_ENDPOINT}?v=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) return { uploadHistory: [], generationHistory: [] };
     const json = await response.json();
@@ -1352,6 +1479,7 @@ async function writeLocalHistoryBackup() {
   const generationHistory = Array.isArray(state.generationHistory) ? state.generationHistory : [];
   if (!uploadHistory.length && !generationHistory.length) return;
   try {
+    if (!(await ensureControlSession())) return;
     await fetch(LOCAL_HISTORY_BACKUP_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1775,6 +1903,10 @@ function uid(prefix = "id") {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function prependRows(targetRows, newRows) {
+  targetRows.unshift(...newRows);
+}
+
 function defaultRows() {
   return [createRow(), createRow()];
 }
@@ -2191,7 +2323,13 @@ function createRow(seed = {}) {
     model,
     version: seed.version || config.versions[0].value,
     size: seed.size ?? (config.sizes[0] || ""),
-    quality: seed.quality ?? (config.qualities[1] || config.qualities[0] || ""),
+    quality: seed.quality ?? (config.defaultQuality || config.qualities[1] || config.qualities[0] || ""),
+    renderQuality: seed.renderQuality ?? config.defaultRenderQuality,
+    background: seed.background ?? config.defaultBackground,
+    outputFormat: seed.outputFormat ?? config.defaultOutputFormat,
+    frameSize: seed.frameSize ?? config.defaultFrameSize,
+    frameCount: seed.frameCount ?? config.defaultFrameCount,
+    frameDurationMs: seed.frameDurationMs ?? config.defaultFrameDurationMs,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
     remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
@@ -2310,7 +2448,7 @@ function normalizeMotionRows(value) {
     });
     row.version = config.versions.some(version => version.value === row.version) ? row.version : config.versions[0].value;
     row.size = config.sizes.includes(row.size) ? row.size : (config.sizes[0] || "");
-    row.quality = config.qualities.includes(row.quality) ? row.quality : (config.qualities[0] || "");
+    row.quality = config.qualities.includes(row.quality) ? row.quality : (config.defaultQuality || config.qualities[0] || "");
     row.status = VALID_ROW_STATUSES.includes(row.status) ? row.status : "pending";
     row.count = Math.max(1, Number(row.count || 1));
     recoverInterruptedRow(row);
@@ -2335,7 +2473,7 @@ function createMotionRow(seed = {}) {
     model,
     version: seed.version || config.versions[0].value,
     size: seed.size ?? (config.sizes[0] || ""),
-    quality: seed.quality ?? (config.qualities[0] || ""),
+    quality: seed.quality ?? (config.defaultQuality || config.qualities[0] || ""),
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
     remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
@@ -2433,6 +2571,7 @@ function createImageVideoRow(seed = {}) {
     quality: seed.quality ?? (config.defaultQuality || config.qualities[0] || ""),
     duration: String(seed.duration || config.defaultDuration || config.durations[0] || "5"),
     generateAudio: seed.generateAudio !== false,
+    outputFormat: seed.outputFormat ?? config.defaultOutputFormat,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
     remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
@@ -2547,12 +2686,15 @@ function createMultiRow(seed = {}) {
     prompt: seed.prompt || "",
     promptExpanded: Boolean(seed.promptExpanded),
     refs: seed.refs || [],
+    klingMode: seed.klingMode === "video_edit" ? "video_edit" : "multi_reference",
+    klingKeepVideoSound: seed.klingKeepVideoSound !== false,
     model,
     version: seed.version || config.versions[0].value,
     size: seed.size ?? (config.defaultSize || config.sizes[0] || ""),
     quality: seed.quality ?? (config.defaultQuality || config.qualities[1] || config.qualities[0] || ""),
     duration: String(seed.duration || config.defaultDuration || config.durations[0] || "5"),
     generateAudio: seed.generateAudio !== false,
+    outputFormat: seed.outputFormat ?? config.defaultOutputFormat,
     count: Math.max(1, Number(seed.count || 1)),
     taskIds: seed.taskIds || [],
     remoteTasks: Array.isArray(seed.remoteTasks) ? seed.remoteTasks : [],
@@ -2615,6 +2757,7 @@ function agentQueueSummary() {
 }
 
 function agentWorkerStatusLabel() {
+  if (state.agentSettingsData?.headless?.enabled) return "后台运行（无需打开网页）";
   const local = state.agentWorkerStatus || {};
   const server = state.agentSettingsData?.worker || {};
   if (local.connection === "online" && local.active) return "在线（当前标签执行）";
@@ -2648,7 +2791,7 @@ function renderAgentApiSettingsDialog() {
         <div class="modal-head">
           <div>
             <h2 id="agentSettingsTitle">Agent API 设置</h2>
-            <p class="muted-note">Codex、Minimax Code 等 Agent 通过本机接口提交，当前浏览器标签负责执行。</p>
+            <p class="muted-note">Codex、Minimax Code 可通过 CLI 后台执行，无需打开网页或配置本机令牌；素材、参数与结果会写入历史。</p>
           </div>
           <button id="closeAgentApiSettings" class="ghost-button" type="button">关闭</button>
         </div>
@@ -2656,7 +2799,7 @@ function renderAgentApiSettingsDialog() {
         <section class="config-section agent-settings-section">
           <div class="agent-settings-status-grid" aria-live="polite">
             <div><span>访问范围</span><strong>本机专用</strong><small>不监听局域网或公网</small></div>
-            <div><span>浏览器执行器</span><strong id="agentWorkerLiveStatus">${escapeHtml(agentWorkerStatusLabel())}</strong><small id="agentWorkerLastError">${escapeHtml(state.agentWorkerStatus?.lastError || "保持一个页面标签打开")}</small></div>
+            <div><span>任务执行器</span><strong id="agentWorkerLiveStatus">${escapeHtml(agentWorkerStatusLabel())}</strong><small id="agentWorkerLastError">${escapeHtml(state.agentWorkerStatus?.lastError || "后台服务持续执行，关闭页面不影响 CLI 任务")}</small></div>
             <div><span>待处理</span><strong id="agentPendingCount">${summary.pending}</strong><small>等待执行器或进入队列</small></div>
             <div><span>处理中</span><strong id="agentActiveCount">${summary.active}</strong><small>上传、提交或生成中</small></div>
             <div><span>恢复任务</span><strong id="agentRecoveryCount">${summary.recovery}</strong><small>继续轮询或待确认</small></div>
@@ -2679,8 +2822,8 @@ function renderAgentApiSettingsDialog() {
         </section>
 
         <section class="config-section agent-settings-section">
-          <h3>本机 Agent 令牌</h3>
-          <p class="muted-note">仅放入环境变量 <code>API_PLUS_AGENT_TOKEN</code>，不要写入提示词、源码或分享包。</p>
+          <h3>兼容客户端令牌（CLI 无需配置）</h3>
+          <p class="muted-note">旧客户端仍可使用 <code>API_PLUS_AGENT_TOKEN</code>。新 CLI 自动连接本机后台，不需要复制令牌。</p>
           <div class="agent-settings-token-row">
             <input id="agentTokenValue" type="${tokenType}" value="${escapeAttr(data.token || "")}" readonly autocomplete="off">
             <button id="toggleAgentToken" class="button" type="button">${state.agentSettingsTokenVisible ? "隐藏" : "显示"}</button>
@@ -2716,6 +2859,7 @@ async function loadAgentApiSettings() {
       token: String(data.token || ""),
       rotatable: Boolean(data.rotatable),
       worker: data.worker || { online: false },
+      headless: data.headless || null,
       queue: data.queue || {}
     };
   } catch (error) {
@@ -2733,7 +2877,7 @@ function refreshAgentSettingsStatus() {
   const liveStatus = document.querySelector("#agentWorkerLiveStatus");
   if (liveStatus) liveStatus.textContent = label;
   const error = document.querySelector("#agentWorkerLastError");
-  if (error) error.textContent = state.agentWorkerStatus?.lastError || "保持一个页面标签打开";
+  if (error) error.textContent = state.agentWorkerStatus?.lastError || "后台服务持续执行，关闭页面不影响 CLI 任务";
   const summary = agentQueueSummary();
   const pending = document.querySelector("#agentPendingCount");
   const active = document.querySelector("#agentActiveCount");
@@ -2782,7 +2926,7 @@ function renderRunningHubMotionConfigWizard() {
           <h3>全局授权</h3>
           <label class="field">
             <span>API Key</span>
-            <input id="runningHubGlobalApiKey" type="password" value="${escapeAttr(settings.apiKey || "")}" spellcheck="false" autocomplete="off">
+            <input id="runningHubGlobalApiKey" type="password" value="${escapeAttr(settings.apiKey || "")}" placeholder="${settings.hasApiKey ? "已保存在本机服务；填写新值可更换" : "RunningHub API Key"}" spellcheck="false" autocomplete="off">
           </label>
         </section>
 
@@ -2879,6 +3023,8 @@ function render() {
   }
   const shouldRestoreScroll = app.dataset.activePage === state.activePage && !hasPendingRowScrollTarget();
   const scrollSnapshot = shouldRestoreScroll ? captureScrollSnapshot() : null;
+  const promptFocus = shouldRestoreScroll ? capturePromptFocus() : null;
+  releasePreviewMedia(app);
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
@@ -2899,7 +3045,7 @@ function render() {
         </div>
         <nav class="nav-group">
           <div class="nav-label">任务类型</div>
-          ${TASK_PAGES.filter(page => page.id !== "history").map(page => navButton(page)).join("")}
+          ${TASK_PAGES.filter(page => page.id !== "history" && !page.hidden).map(page => navButton(page)).join("")}
           <div class="nav-label">缓存</div>
           ${navButton(TASK_PAGES.find(page => page.id === "history"))}
         </nav>
@@ -2918,6 +3064,65 @@ function render() {
   bindShell();
   renderPage();
   if (scrollSnapshot) restoreScrollSnapshot(scrollSnapshot);
+  if (promptFocus) restorePromptFocus(promptFocus);
+  activateVisibleMedia(app);
+  if (assetDialog.open) activateVisibleMedia(assetDialogGrid);
+}
+
+function capturePromptFocus() {
+  const textarea = document.activeElement;
+  if (!app.contains(textarea) || !textarea.matches('textarea[data-field="prompt"]')) return null;
+  const rowElement = textarea.closest("tr");
+  const rowId = rowElement && Object.entries(rowElement.dataset).find(([key]) => key.endsWith("RowId") || key === "rowId")?.[1];
+  return rowId ? { rowId, start: textarea.selectionStart, end: textarea.selectionEnd, top: textarea.scrollTop, left: textarea.scrollLeft } : null;
+}
+
+function restorePromptFocus(snapshot) {
+  const textarea = findRenderedTaskRow({ id: snapshot.rowId })?.querySelector('textarea[data-field="prompt"]');
+  if (!textarea || textarea.disabled) return;
+  textarea.focus({ preventScroll: true });
+  textarea.setSelectionRange(snapshot.start, snapshot.end);
+  textarea.scrollTop = snapshot.top;
+  textarea.scrollLeft = snapshot.left;
+}
+
+let previewObserver = null;
+
+function activateVisibleMedia(root) {
+  const media = root.querySelectorAll("video[data-preview-src]");
+  const load = element => {
+    if (!element.dataset.previewSrc || element.getAttribute("src")) return;
+    element.src = element.dataset.previewSrc;
+    element.preload = "metadata";
+  };
+  if (typeof IntersectionObserver === "undefined") return media.forEach(load);
+  previewObserver ||= new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.target.isConnected) {
+        previewObserver?.unobserve(entry.target);
+        unloadPreviewMedia(entry.target);
+        continue;
+      }
+      if (entry.isIntersecting) load(entry.target);
+      else if (!entry.target.controls || entry.target.paused) unloadPreviewMedia(entry.target);
+    }
+  }, { rootMargin: "100px" });
+  media.forEach(element => previewObserver.observe(element));
+}
+
+function unloadPreviewMedia(media) {
+  if (!media.getAttribute("src")) return;
+  media.pause();
+  media.removeAttribute("src");
+  media.preload = "none";
+  media.load();
+}
+
+function releasePreviewMedia(root) {
+  root.querySelectorAll("video[data-preview-src]").forEach(media => {
+    previewObserver?.unobserve(media);
+    unloadPreviewMedia(media);
+  });
 }
 
 function hasPendingRowScrollTarget() {
@@ -3195,6 +3400,26 @@ function deleteSelectedRows() {
 }
 
 function renderPage() {
+  const shell = document.querySelector(".app-shell");
+  shell?.classList.toggle("avatar-workflow-shell", state.activePage === "avatarWorkflow");
+  if (state.activePage === "avatarWorkflow" && shell && !shell.querySelector(".avatar-mobile-menu")) {
+    const menu = document.createElement("button");
+    menu.className = "avatar-mobile-menu";
+    menu.type = "button";
+    menu.textContent = "工作台菜单";
+    menu.setAttribute("aria-expanded", "false");
+    menu.addEventListener("click", () => {
+      const open = shell.classList.toggle("avatar-menu-open");
+      menu.setAttribute("aria-expanded", String(open));
+      menu.textContent = open ? "关闭工作台菜单" : "工作台菜单";
+    });
+    shell.prepend(menu);
+  }
+  if (state.activePage !== "avatarWorkflow") window.AvatarWorkflowUI?.unmount();
+  if (audioWorkbenchController) {
+    audioWorkbenchController.destroy();
+    audioWorkbenchController = null;
+  }
   if (state.activePage === "history") {
     renderHistoryPage();
   } else if (state.activePage === "image") {
@@ -3205,6 +3430,8 @@ function renderPage() {
     renderMotionPage();
   } else if (state.activePage === "multiVideo") {
     renderMultiVideoPage();
+  } else if (state.activePage === "audio") {
+    renderAudioWorkbenchPage();
   } else if (state.activePage === "viduRef") {
     renderViduRefPage();
   } else if (state.activePage === "viduVoice") {
@@ -3213,6 +3440,12 @@ function renderPage() {
     renderSubjectLibraryPage();
   } else if (state.activePage === "avatar") {
     renderAvatarPage();
+  } else if (state.activePage === "avatarWorkflow") {
+    window.AvatarWorkflowUI.mount(document.querySelector("#workspace"), {
+      apiBase: localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT,
+      origin: currentBrowserOrigin(),
+      onHistoryChanged: () => initializeHistoryStorage()
+    });
   } else if (state.activePage === "music") {
     renderMusicPage();
   } else {
@@ -3233,6 +3466,35 @@ function renderPlaceholder() {
   `;
 }
 
+function renderAudioWorkbenchPage() {
+  const client = globalThis.ApiWorkbenchBrowserClient.createClient({
+    controlAuth: async () => {
+      try { return await controlHistoryRequest("/agent-auth"); }
+      catch {
+        controlSessionReadyPromise = null;
+        return controlHistoryRequest("/agent-auth");
+      }
+    },
+    origin: currentBrowserOrigin,
+    apiBase
+  });
+  audioWorkbenchController = window.AudioWorkbenchUI.mount({
+    container: document.querySelector("#workspace"),
+    ...client,
+    uploadFile: async file => {
+      const asset = await uploadLocalFileAsset(file);
+      return addUploadHistory(asset) || asset;
+    },
+    openAssetPicker: ({ type } = {}) => new Promise(resolve => {
+      if (audioAssetPickerResolve) audioAssetPickerResolve(null);
+      audioAssetPickerResolve = resolve;
+      openAssetDialog("audio:reference", type || "audio");
+    }),
+    onHistory: () => initializeHistoryStorage(),
+    onToast: message => window.alert(message)
+  });
+}
+
 function renderImagePage() {
   const workspace = document.querySelector("#workspace");
   const stats = getStats();
@@ -3240,7 +3502,7 @@ function renderImagePage() {
     <section class="topbar">
       <div class="page-title">
         <h2>图片生成</h2>
-        <p>Nano Banana、Seedream、Midjourney、Kontext Image、Qwen Image、GPT Image、Kling Omni Image</p>
+        <p>Nano Banana、Seedream、Midjourney、Kontext Image、Qwen Image、GPT Image 2.6 / 2.5、MiniMax H3 Image、Kling Omni Image</p>
       </div>
       <div class="topbar-controls">
         <label class="field compact-field">
@@ -3301,7 +3563,7 @@ function renderMultiVideoPage() {
     <section class="topbar">
       <div class="page-title">
         <h2>多模态生视频</h2>
-        <p>Seedance 2.0 与可灵 3 Omni 多模态参考；素材编号可在 Prompt 中通过 @ 引用。</p>
+        <p>多模态参考与可灵视频编辑；选择可灵后可切换编辑模式，素材编号通过 @ 引用。</p>
       </div>
       <div class="topbar-controls">
         <label class="field compact-field">
@@ -4637,7 +4899,7 @@ function renderTaskResultCell(row) {
 }
 
 function renderOptions(values, selected, emptyLabel) {
-  const options = [`<option value="" ${selected ? "" : "selected"}>${emptyLabel}</option>`];
+  const options = emptyLabel === null ? [] : [`<option value="" ${selected ? "" : "selected"}>${emptyLabel}</option>`];
   values.forEach(value => {
     options.push(`<option value="${value}" ${selected === value ? "selected" : ""}>${renderOptionLabel(value)}</option>`);
   });
@@ -4645,6 +4907,7 @@ function renderOptions(values, selected, emptyLabel) {
 }
 
 function renderOptionLabel(value) {
+  if (String(value) === "-1") return "自动（-1）";
   return value === "adaptive" ? "自动" : value;
 }
 
@@ -4680,19 +4943,32 @@ function renderImageModelCell(row, model, disabled) {
 
 function renderImageParamsCell(row, qualityOptions, disabled) {
   const model = IMAGE_MODELS[row.model] || IMAGE_MODELS.nano;
+  const raster = !model.outputFormats || (row.outputFormat ?? model.defaultOutputFormat) === "png";
   return renderStackedControlCell([
-    {
+    raster && {
       label: "尺寸",
       control: `<select class="select-small" data-field="size" ${disabled}>
         ${renderOptions(model.sizes, row.size, "空")}
       </select>`
     },
-    {
+    raster && {
       label: "清晰度",
       control: `<select class="select-small" data-field="quality" ${disabled}>
         ${renderOptions(qualityOptions, row.quality, "空")}
       </select>`
-    }
+    },
+    ...(model.renderQualities ? [
+      { label: "渲染质量", control: `<select class="select-small" data-field="renderQuality" ${disabled}>${renderOptions(model.renderQualities, row.renderQuality ?? model.defaultRenderQuality, null)}</select>` },
+      { label: "背景", control: `<select class="select-small" data-field="background" ${disabled}>${renderOptions(model.backgrounds, row.background ?? model.defaultBackground, null)}</select>` }
+    ] : []),
+    ...(model.outputFormats ? [
+      { label: "输出格式", control: `<select class="select-small" data-field="outputFormat" ${disabled}>${renderOptions(model.outputFormats, row.outputFormat ?? model.defaultOutputFormat, null)}</select>` }
+    ] : []),
+    ...(model.frameSizes && row.outputFormat === "gif" ? [
+      { label: "GIF 帧尺寸", control: `<select class="select-small" data-field="frameSize" ${disabled}>${renderOptions(model.frameSizes, row.frameSize ?? model.defaultFrameSize, null)}</select>` },
+      { label: "GIF 帧数", control: `<input class="select-small" data-field="frameCount" type="number" min="2" max="16" step="1" value="${escapeAttr(row.frameCount ?? model.defaultFrameCount)}" ${disabled}>` },
+      { label: "每帧时长 (ms)", control: `<input class="select-small" data-field="frameDurationMs" type="number" min="20" max="2000" step="10" value="${escapeAttr(row.frameDurationMs ?? model.defaultFrameDurationMs)}" ${disabled}>` }
+    ] : [])
   ]);
 }
 
@@ -4731,7 +5007,7 @@ function renderImageVideoParamsCell(row, disabled) {
     {
       label: "时长",
       control: `<select class="select-small" data-image-video-field="duration" ${disabled}>
-        ${renderOptions(getImageVideoDurationOptions(row), String(row.duration), "空")}
+        ${renderOptions(getImageVideoDurationOptions(row), String(row.duration), row.model === "seedance25" ? null : "空")}
       </select>`
     }
   ];
@@ -4744,11 +5020,15 @@ function renderImageVideoParamsCell(row, disabled) {
       </label>`
     });
   }
+  if (model.outputFormats) controls.push({
+    label: "格式",
+    control: `<select class="select-small" data-image-video-field="outputFormat" ${disabled}>${renderOptions(model.outputFormats, row.outputFormat ?? model.defaultOutputFormat, null)}</select>`
+  });
   return renderStackedControlCell(controls);
 }
 
 function renderMultiModelCell(row, model, disabled) {
-  return renderStackedControlCell([
+  const controls = [
     {
       label: "模型",
       control: `<select class="select-small" data-multi-field="model" ${disabled}>
@@ -4757,14 +5037,32 @@ function renderMultiModelCell(row, model, disabled) {
     },
     {
       label: "版本",
-      control: `<select class="select-small" data-multi-field="version" ${disabled}>
+      control: row.model === "kling3Omni" && row.klingMode === "video_edit"
+        ? `<span class="muted-note">编辑接口默认版本</span>`
+        : `<select class="select-small" data-multi-field="version" ${disabled}>
         ${model.versions.map(version => `<option value="${version.value}" ${row.version === version.value ? "selected" : ""}>${version.label}</option>`).join("")}
       </select>`
     }
-  ]);
+  ];
+  if (row.model === "kling3Omni") controls.push({
+    label: "功能",
+    control: `<select class="select-small" data-multi-field="klingMode" ${disabled}>
+      <option value="multi_reference" ${row.klingMode !== "video_edit" ? "selected" : ""}>多主体参考</option>
+      <option value="video_edit" ${row.klingMode === "video_edit" ? "selected" : ""}>视频编辑</option>
+    </select>`
+  });
+  return renderStackedControlCell(controls);
 }
 
 function renderMultiParamsCell(row, model, disabled) {
+  if (row.model === "kling3Omni" && row.klingMode === "video_edit") {
+    return renderStackedControlCell([
+      { label: "画幅 / 时长", control: `<span class="muted-note">跟随原视频</span>` },
+      { label: "清晰度", control: `<select class="select-small" data-multi-field="quality" ${disabled}>${renderOptions(getMultiQualityOptions(row), row.quality, null)}</select>` },
+      { label: "保留原声", control: `<input data-multi-field="klingKeepVideoSound" type="checkbox" ${row.klingKeepVideoSound !== false ? "checked" : ""} ${disabled}>` },
+      { label: "素材要求", control: `<span class="muted-note">1 段 3–10 秒 MP4/MOV，宽高各 720–2160px，≤200MB；最多 4 张 JPG/PNG 参考图。</span>` }
+    ]);
+  }
   const controls = [
     {
       label: "尺寸",
@@ -4781,7 +5079,7 @@ function renderMultiParamsCell(row, model, disabled) {
     {
       label: "时长",
       control: `<select class="select-small" data-multi-field="duration" ${disabled}>
-        ${renderOptions(model.durations, String(row.duration), "空")}
+        ${renderOptions(model.durations, String(row.duration), row.model === "seedance25" ? null : "空")}
       </select>`
     }
   ];
@@ -4791,6 +5089,10 @@ function renderMultiParamsCell(row, model, disabled) {
       control: `<input data-multi-field="generateAudio" type="checkbox" ${row.generateAudio ? "checked" : ""} ${disabled}>`
     });
   }
+  if (model.outputFormats) controls.push({
+    label: "格式",
+    control: `<select class="select-small" data-multi-field="outputFormat" ${disabled}>${renderOptions(model.outputFormats, row.outputFormat ?? model.defaultOutputFormat, null)}</select>`
+  });
   return renderStackedControlCell(controls);
 }
 
@@ -4890,6 +5192,7 @@ function renderPromptCell(row, disabled = "") {
       <textarea class="prompt-input" data-field="prompt" rows="4" title="多模态页可用 @1、@2 或 @素材名 指定参考素材" ${disabled}>${escapeHtml(text)}</textarea>
       <div class="prompt-actions">
         <button class="tiny-button toggle-prompt" type="button">查看全部</button>
+        <button class="tiny-button open-prompt-library" type="button">提示词库</button>
         <button class="tiny-button copy-prompt" type="button" ${text.trim() ? "" : "disabled"}>复制提示词</button>
         <button class="tiny-button paste-prompt" type="button" ${disabled}>粘贴提示词</button>
         <button class="tiny-button clear-prompt" type="button" ${text.trim() && !disabled ? "" : "disabled"}>清空提示词</button>
@@ -4911,11 +5214,12 @@ function renderCountControl(row) {
 function renderImagePicker(row) {
   row.images = Array.isArray(row.images) ? row.images : [];
   const locked = isRowLocked(row);
-  const disabled = locked ? "disabled" : "";
+  const svg = row.model === "gpt26" && row.outputFormat === "svg";
+  const disabled = locked || svg ? "disabled" : "";
   return `
     <div class="image-picker ${locked ? "locked-picker" : ""}">
       <div class="image-drop" data-drop-row="${row.id}" tabindex="0" title="点击这里后按 Ctrl+V 可粘贴截图或复制的图片">
-        ${row.images.length ? row.images.map(item => renderAssetChip(item, locked)).join("") : `<span class="empty-drop">${locked ? "生成中，素材已锁定" : "拖入图片、选择历史或粘贴图片"}</span>`}
+        ${row.images.length ? row.images.map(item => renderAssetChip(item, locked)).join("") : `<span class="empty-drop">${locked ? "生成中，素材已锁定" : svg ? "SVG 仅使用提示词，不支持参考图片" : "拖入图片、选择历史或粘贴图片"}</span>`}
       </div>
       <div class="picker-actions">
         <button class="tiny-button choose-assets" type="button" ${disabled}>选择</button>
@@ -4934,7 +5238,7 @@ function renderImagePicker(row) {
 function renderAssetChip(item, locked = false) {
   return `
     <div class="asset-chip asset-chip-${item.type || "other"}" draggable="${locked ? "false" : "true"}" data-asset-id="${item.id}">
-      ${item.type === "video" ? `<video src="${escapeAttr(item.preview || item.url)}" controls preload="metadata"></video>` : item.type === "audio" ? `<audio src="${escapeAttr(item.url)}" controls preload="metadata"></audio>` : `<img src="${escapeAttr(item.preview || item.url)}" alt="">`}
+      ${item.type === "video" ? `<video data-preview-src="${escapeAttr(item.preview || item.url)}" controls preload="none"></video>` : item.type === "audio" ? `<audio src="${escapeAttr(item.url)}" controls preload="none"></audio>` : `<img src="${escapeAttr(item.preview || item.url)}" loading="lazy" decoding="async" alt="">`}
       <small>${assetMeta(item)}</small>
       <button class="chip-remove" type="button" data-remove-asset="${item.id}" ${locked ? "disabled" : ""}>x</button>
     </div>
@@ -4996,7 +5300,36 @@ function findRenderedTaskRow(row) {
 function syncPromptDetailCompactTextarea(context, value) {
   const rowElement = findRenderedTaskRow(context.row);
   const compact = rowElement?.querySelector('textarea[data-field="prompt"]');
-  if (compact) compact.value = value;
+  if (compact && compact.value !== value) compact.value = value;
+}
+
+const pendingPromptSaves = new Map();
+
+function flushInlinePromptSaves(type) {
+  for (const [key, pending] of pendingPromptSaves) {
+    if (type && key !== type) continue;
+    clearTimeout(pending.timer);
+    pendingPromptSaves.delete(key);
+    pending.persist();
+  }
+}
+
+function updateInlinePrompt(row, type, value, flush) {
+  const context = createPromptDetailContext(row, type);
+  if (row.prompt !== String(value ?? "")) {
+    if (!context.updatePrompt(value)) return;
+    clearTimeout(pendingPromptSaves.get(type)?.timer);
+    pendingPromptSaves.set(type, {
+      persist: context.persist,
+      timer: setTimeout(() => flushInlinePromptSaves(type), 250)
+    });
+  }
+  const element = findRenderedTaskRow(row);
+  const copy = element?.querySelector(".copy-prompt");
+  const clear = element?.querySelector(".clear-prompt");
+  if (copy) copy.disabled = !row.prompt.trim();
+  if (clear) clear.disabled = !row.prompt.trim() || context.isLocked();
+  if (flush) flushInlinePromptSaves(type);
 }
 
 function createPromptDetailContext(row, type) {
@@ -5015,7 +5348,15 @@ function createPromptDetailContext(row, type) {
       if (becameDirty) refreshRowSubmittedStateDisplay(row);
       return true;
     },
-    persist: binding.persist
+    persist: binding.persist,
+    afterApply() {
+      if (promptDetailSession?.context.row !== row) return;
+      const textarea = promptDetailSession.overlay.querySelector("[data-prompt-detail-prompt]");
+      textarea.value = row.prompt;
+      textarea.setSelectionRange(0, 0);
+      textarea.scrollTop = 0;
+      applyPromptDetailTextareaValue();
+    }
   };
   return context;
 }
@@ -5045,6 +5386,32 @@ function renderPromptDetailReference(entry, { insertable = false } = {}) {
 function shortAssetName(value, max = 42) {
   const text = String(value || "");
   return text.length > max ? `${text.slice(0, Math.max(8, max - 14))}...${text.slice(-10)}` : text;
+}
+
+function openPromptLibrary(context) {
+  flushInlinePromptSaves();
+  flushPromptDetailPersist();
+  if (promptLibraryPanel) promptLibraryPanel.open(context);
+}
+
+function recordUsedPrompt(row, type) {
+  if (!promptLibraryClient || !String(row.prompt || "").trim()) return;
+  promptLibraryClient.record(type === "multi" ? "multiVideo" : type, row.prompt, { model: row.model, usedAt: Date.now() })
+    .catch(error => console.warn("Prompt history save failed", error));
+}
+
+async function initializePromptLibrary() {
+  if (!globalThis.PromptLibrary || !globalThis.PromptLibraryPanel) return;
+  promptLibraryClient = PromptLibrary.createClient();
+  promptLibraryPanel = PromptLibraryPanel.createPanel({ client: promptLibraryClient, copyText: copyPromptText });
+  try {
+    await promptLibraryClient.ready;
+    const imported = state.generationHistory.map(record => ({
+      taskType: generationPageFromRecord(record), text: record.prompt,
+      usedAt: Number(record.createdAt || 0), model: record.model
+    })).filter(record => ["image", "imageVideo", "multiVideo", "motion", "avatar", "viduRef"].includes(record.taskType) && String(record.text || "").trim());
+    if (imported.length) await promptLibraryClient.importOnce("generation-history-v1", imported);
+  } catch (error) { console.warn("Prompt library initialization failed", error); }
 }
 
 function schedulePromptDetailPersist() {
@@ -5111,9 +5478,13 @@ function insertPromptDetailToken(token, selectionStart, selectionEnd) {
   if (!promptDetailSession || refreshPromptDetailLockState()) return false;
   const textarea = promptDetailSession.overlay.querySelector("[data-prompt-detail-prompt]");
   const result = insertPromptToken(textarea.value, selectionStart, selectionEnd, token);
-  textarea.value = result.value;
-  textarea.focus();
+  const scrollTop = textarea.scrollTop;
+  const scrollLeft = textarea.scrollLeft;
+  textarea.setRangeText(token, selectionStart, selectionEnd, "end");
+  textarea.focus({ preventScroll: true });
   textarea.setSelectionRange(result.caret, result.caret);
+  textarea.scrollTop = scrollTop;
+  textarea.scrollLeft = scrollLeft;
   promptDetailSession.selectionStart = result.caret;
   promptDetailSession.selectionEnd = result.caret;
   return applyPromptDetailTextareaValue();
@@ -5162,7 +5533,7 @@ function ensurePromptDetailOverlay() {
               <strong>Prompt</strong>
               <small class="prompt-detail-edit-state" data-prompt-detail-edit-state></small>
             </div>
-            <button class="tiny-button" type="button" data-prompt-detail-copy>复制提示词</button>
+            <div class="prompt-actions"><button class="tiny-button" type="button" data-prompt-detail-library>提示词库</button><button class="tiny-button" type="button" data-prompt-detail-copy>复制提示词</button></div>
           </div>
           <textarea class="prompt-detail-prompt" data-prompt-detail-prompt></textarea>
         </section>
@@ -5181,6 +5552,9 @@ function ensurePromptDetailOverlay() {
     if (event.target === overlay) closePromptDetailPanel();
   });
   overlay.querySelector("[data-prompt-detail-close]").addEventListener("click", closePromptDetailPanel);
+  overlay.querySelector("[data-prompt-detail-library]").addEventListener("click", () => {
+    if (promptDetailSession) openPromptLibrary(promptDetailSession.context);
+  });
   overlay.querySelector("[data-prompt-detail-copy]").addEventListener("click", () => {
     copyPromptText(overlay.querySelector("[data-prompt-detail-prompt]").value);
   });
@@ -5266,6 +5640,12 @@ function openBatchPromptDialog() {
       version: first.version,
       size: first.size,
       quality: first.quality,
+      renderQuality: first.renderQuality,
+      background: first.background,
+      outputFormat: first.outputFormat,
+      frameSize: first.frameSize,
+      frameCount: first.frameCount,
+      frameDurationMs: first.frameDurationMs,
       count: Math.max(1, Number(first.count || 1))
     };
   }
@@ -5281,6 +5661,23 @@ function renderBatchDefaults() {
   batchVersion.innerHTML = getModel(rowLike).versions.map(version => `<option value="${version.value}" ${defaults.version === version.value ? "selected" : ""}>${version.label}</option>`).join("");
   batchSize.innerHTML = renderOptions(getModel(rowLike).sizes, defaults.size, "空");
   batchQuality.innerHTML = renderOptions(getQualityOptions(rowLike), defaults.quality, "空");
+  const model = getModel(rowLike);
+  batchRenderQuality.closest("label").hidden = !model.renderQualities;
+  batchBackground.closest("label").hidden = !model.backgrounds;
+  batchRenderQuality.innerHTML = renderOptions(model.renderQualities || [], defaults.renderQuality, null);
+  batchBackground.innerHTML = renderOptions(model.backgrounds || [], defaults.background, null);
+  const raster = !model.outputFormats || defaults.outputFormat === "png";
+  batchSize.closest("label").hidden = !raster;
+  batchQuality.closest("label").hidden = !raster;
+  batchOutputFormat.closest("label").hidden = !model.outputFormats;
+  batchOutputFormat.innerHTML = renderOptions(model.outputFormats || [], defaults.outputFormat, null);
+  batchFrameSize.closest("label").hidden = !model.frameSizes || defaults.outputFormat !== "gif";
+  batchFrameCount.closest("label").hidden = !model.frameSizes || defaults.outputFormat !== "gif";
+  batchFrameDurationMs.closest("label").hidden = !model.frameSizes || defaults.outputFormat !== "gif";
+  batchFrameSize.innerHTML = renderOptions(model.frameSizes || [], defaults.frameSize, null);
+  batchFrameCount.value = defaults.frameCount ?? "";
+  batchFrameDurationMs.value = defaults.frameDurationMs ?? "";
+  for (const control of [batchChooseAssets, batchUploadImages, batchPasteImages]) control.disabled = defaults.model === "gpt26" && defaults.outputFormat === "svg";
   batchCount.value = defaults.count;
   renderBatchImages();
 }
@@ -5312,7 +5709,13 @@ function normalizeBatchDefaults(defaults = {}) {
     model,
     version: config.versions.some(item => item.value === defaults.version) ? defaults.version : config.versions[0].value,
     size: config.sizes.includes(defaults.size) ? defaults.size : (config.sizes[0] || ""),
-    quality: config.qualities.includes(defaults.quality) ? defaults.quality : (config.qualities[1] || config.qualities[0] || ""),
+    quality: config.qualities.includes(defaults.quality) ? defaults.quality : (config.defaultQuality || config.qualities[1] || config.qualities[0] || ""),
+    renderQuality: config.renderQualities?.includes(defaults.renderQuality) ? defaults.renderQuality : config.defaultRenderQuality,
+    background: config.backgrounds?.includes(defaults.background) ? defaults.background : config.defaultBackground,
+    outputFormat: config.outputFormats?.includes(defaults.outputFormat) ? defaults.outputFormat : config.defaultOutputFormat,
+    frameSize: defaults.frameSize ?? config.defaultFrameSize,
+    frameCount: defaults.frameCount ?? config.defaultFrameCount,
+    frameDurationMs: defaults.frameDurationMs ?? config.defaultFrameDurationMs,
     count: Math.max(1, Number(defaults.count || 1))
   };
   if (model === "gpt") {
@@ -5333,6 +5736,12 @@ function readBatchDefaultsFromControls() {
     version: batchVersion.value,
     size: batchSize.value,
     quality: batchQuality.value,
+    renderQuality: batchRenderQuality.value,
+    background: batchBackground.value,
+    outputFormat: batchOutputFormat.value,
+    frameSize: batchFrameSize.value || undefined,
+    frameCount: batchFrameCount.value || undefined,
+    frameDurationMs: batchFrameDurationMs.value || undefined,
     count: batchCount.value
   });
 }
@@ -5345,7 +5754,13 @@ function bindBatchDefaultControls() {
       model: batchModel.value,
       version: config.versions[0].value,
       size: chooseCompatibleOption(previous.size, config.sizes),
-      quality: chooseCompatibleOption(previous.quality, config.qualities, config.qualities[1] || config.qualities[0] || ""),
+      quality: chooseCompatibleOption(previous.quality, config.qualities, config.defaultQuality || config.qualities[1] || config.qualities[0] || ""),
+      renderQuality: previous.renderQuality,
+      background: previous.background,
+      outputFormat: previous.outputFormat,
+      frameSize: previous.frameSize,
+      frameCount: previous.frameCount,
+      frameDurationMs: previous.frameDurationMs,
       count: previous.count
     });
     state.batchImages = state.batchImages.slice(0, getBatchModel().maxImages);
@@ -5361,6 +5776,21 @@ function bindBatchDefaultControls() {
   batchQuality.addEventListener("change", () => {
     state.batchDefaults = normalizeBatchDefaults({ ...readBatchDefaultsFromControls(), quality: batchQuality.value });
   });
+  [batchRenderQuality, batchBackground].forEach(control => control.addEventListener("change", () => {
+    state.batchDefaults = readBatchDefaultsFromControls();
+  }));
+  batchOutputFormat.addEventListener("change", () => {
+    if (batchOutputFormat.value === "svg" && state.batchImages.length) {
+      alert("SVG 不支持参考图片，请先移除统一图片");
+      renderBatchDefaults();
+      return;
+    }
+    state.batchDefaults = readBatchDefaultsFromControls();
+    renderBatchDefaults();
+  });
+  [batchFrameSize, batchFrameCount, batchFrameDurationMs].forEach(control => control.addEventListener("change", () => {
+    state.batchDefaults = readBatchDefaultsFromControls();
+  }));
   batchCount.addEventListener("change", () => {
     state.batchDefaults = normalizeBatchDefaults({ ...readBatchDefaultsFromControls(), count: batchCount.value });
     batchCount.value = state.batchDefaults.count;
@@ -5430,7 +5860,7 @@ function bindImagePage() {
   document.querySelector("#globalUpload").addEventListener("change", event => uploadFiles(Array.from(event.target.files || [])));
   document.querySelector("#addRowBtn").addEventListener("click", () => {
     const row = createRow();
-    state.rows.push(row);
+    prependRows(state.rows, [row]);
     state.scrollToImageRowId = row.id;
     persistRows();
     render();
@@ -5456,7 +5886,7 @@ function bindMultiVideoPage() {
   document.querySelector("#multiGlobalUpload").addEventListener("change", event => uploadFiles(Array.from(event.target.files || [])));
   document.querySelector("#addMultiRowBtn").addEventListener("click", () => {
     const row = createMultiRow();
-    state.multiRows.push(row);
+    prependRows(state.multiRows, [row]);
     state.scrollToMultiRowId = row.id;
     persistMultiRows();
     render();
@@ -5480,7 +5910,7 @@ function bindViduRefPage() {
   document.querySelector("#viduRefGlobalUpload").addEventListener("change", event => uploadViduRefFiles(Array.from(event.target.files || [])));
   document.querySelector("#addViduRefRowBtn").addEventListener("click", () => {
     const row = createViduRefRow();
-    state.viduRefRows.push(row);
+    prependRows(state.viduRefRows, [row]);
     state.scrollToViduRefRowId = row.id;
     persistViduRefRows();
     render();
@@ -5504,7 +5934,7 @@ function bindImageVideoPage() {
   document.querySelector("#imageVideoGlobalUpload").addEventListener("change", event => uploadFiles(Array.from(event.target.files || [])));
   document.querySelector("#addImageVideoRowBtn").addEventListener("click", () => {
     const row = createImageVideoRow();
-    state.imageVideoRows.push(row);
+    prependRows(state.imageVideoRows, [row]);
     state.scrollToImageVideoRowId = row.id;
     persistImageVideoRows();
     render();
@@ -5528,7 +5958,7 @@ function bindMotionPage() {
   document.querySelector("#motionGlobalUpload").addEventListener("change", event => uploadFiles(Array.from(event.target.files || [])));
   document.querySelector("#addMotionRowBtn").addEventListener("click", () => {
     const row = createMotionRow();
-    state.motionRows.push(row);
+    prependRows(state.motionRows, [row]);
     state.scrollToMotionRowId = row.id;
     persistMotionRows();
     render();
@@ -5564,7 +5994,7 @@ function bindAvatarPage() {
   document.querySelector("#avatarGlobalUpload").addEventListener("change", event => uploadFiles(Array.from(event.target.files || [])));
   document.querySelector("#addAvatarRowBtn").addEventListener("click", () => {
     const row = createAvatarRow();
-    state.avatarRows.push(row);
+    prependRows(state.avatarRows, [row]);
     state.scrollToAvatarRowId = row.id;
     persistAvatarRows();
     render();
@@ -6430,12 +6860,25 @@ function bindRow(tr, row) {
 
 function updateRowField(row, field, value, redraw = true) {
   if (isRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "image", value, redraw);
+  if (row.model === "gpt26" && field === "outputFormat" && value === "svg" && row.images.length) {
+    row.error = "SVG 不支持参考图片，请先移除参考图片";
+    persistRows();
+    if (redraw) render();
+    return;
+  }
   const becameDirty = markRowDirty(row);
   if (field === "model") {
     const next = IMAGE_MODELS[value] || IMAGE_MODELS.nano;
     const previousSize = row.size;
     const previousQuality = row.quality;
     row.model = value;
+    row.renderQuality = next.renderQualities?.includes(row.renderQuality) ? row.renderQuality : next.defaultRenderQuality;
+    row.background = next.backgrounds?.includes(row.background) ? row.background : next.defaultBackground;
+    row.outputFormat = next.outputFormats?.includes(row.outputFormat) ? row.outputFormat : next.defaultOutputFormat;
+    row.frameSize = next.frameSizes?.includes(row.frameSize) ? row.frameSize : next.defaultFrameSize;
+    row.frameCount = next.defaultFrameCount;
+    row.frameDurationMs = next.defaultFrameDurationMs;
     row.version = next.versions[0].value;
     row.size = chooseCompatibleOption(previousSize, next.sizes);
     row.quality = chooseCompatibleOption(previousQuality, next.qualities, next.qualities[1] || next.qualities[0] || "");
@@ -6505,6 +6948,7 @@ function handleDrop(event, row, drop) {
 function updateImageVideoRowField(row, field, value, redraw = true) {
   if (field === "generateAudio" && !getImageVideoModel(row).supportsGenerateAudio) return;
   if (isImageVideoRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "imageVideo", value, redraw);
   const becameDirty = markRowDirty(row);
   if (field === "model") {
     const next = IMAGE_VIDEO_MODELS[value] || IMAGE_VIDEO_MODELS.hailuo;
@@ -6512,6 +6956,7 @@ function updateImageVideoRowField(row, field, value, redraw = true) {
     const previousQuality = row.quality;
     const previousDuration = row.duration;
     row.model = value;
+    row.outputFormat = next.outputFormats?.includes(row.outputFormat) ? row.outputFormat : next.defaultOutputFormat;
     row.version = next.versions[0].value;
     row.size = previousSize === "" && !next.defaultSize ? "" : chooseCompatibleOption(previousSize, getImageVideoSizeOptions(row), next.defaultSize || getImageVideoSizeOptions(row)[0] || "");
     row.quality = nearestQualityOption(previousQuality, getImageVideoQualityOptions(row), next.defaultQuality || getImageVideoQualityOptions(row)[0] || "");
@@ -6543,6 +6988,7 @@ function updateImageVideoRowField(row, field, value, redraw = true) {
 
 function updateMotionRowField(row, field, value, redraw = true) {
   if (isMotionRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "motion", value, redraw);
   const becameDirty = markRowDirty(row);
   if (field === "model") {
     const next = getMotionModel({ model: value });
@@ -6551,7 +6997,7 @@ function updateMotionRowField(row, field, value, redraw = true) {
     row.model = value;
     row.version = next.versions[0].value;
     row.size = chooseCompatibleOption(previousSize, next.sizes, next.sizes[0] || "");
-    row.quality = chooseCompatibleOption(previousQuality, next.qualities, next.qualities[0] || "");
+    row.quality = chooseCompatibleOption(previousQuality, next.qualities, next.defaultQuality || next.qualities[0] || "");
   } else if (field === "version") {
     row.version = value;
   } else if (field === "count") {
@@ -6566,6 +7012,7 @@ function updateMotionRowField(row, field, value, redraw = true) {
 
 function updateAvatarRowField(row, field, value, redraw = true) {
   if (isAvatarRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "avatar", value, redraw);
   const becameDirty = markRowDirty(row);
   if (field === "model") {
     const next = getAvatarModel({ model: value });
@@ -6629,6 +7076,7 @@ function handleImageVideoFrameDrop(event, row, field, drop) {
 function updateMultiRowField(row, field, value, redraw = true) {
   if (field === "generateAudio" && !getMultiModel(row).supportsGenerateAudio) return;
   if (isMultiRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "multi", value, redraw);
   const becameDirty = markRowDirty(row);
   if (field === "model") {
     const next = MULTI_VIDEO_MODELS[value] || MULTI_VIDEO_MODELS.seedance;
@@ -6636,6 +7084,7 @@ function updateMultiRowField(row, field, value, redraw = true) {
     const previousQuality = row.quality;
     const previousDuration = row.duration;
     row.model = value;
+    row.outputFormat = next.outputFormats?.includes(row.outputFormat) ? row.outputFormat : next.defaultOutputFormat;
     row.version = next.versions[0].value;
     row.size = chooseCompatibleOption(previousSize, next.sizes, next.defaultSize || next.sizes[0] || "");
     const qualityOptions = getMultiQualityOptions(row);
@@ -6651,6 +7100,10 @@ function updateMultiRowField(row, field, value, redraw = true) {
     row.duration = String(value || "5");
   } else if (field === "generateAudio") {
     row.generateAudio = Boolean(value);
+  } else if (field === "klingKeepVideoSound") {
+    row.klingKeepVideoSound = Boolean(value);
+  } else if (field === "klingMode") {
+    row.klingMode = value === "video_edit" ? "video_edit" : "multi_reference";
   } else {
     row[field] = value;
   }
@@ -6661,6 +7114,7 @@ function updateMultiRowField(row, field, value, redraw = true) {
 
 function updateViduRefRowField(row, field, value, redraw = true) {
   if (isViduRefRowLocked(row)) return;
+  if (field === "prompt") return updateInlinePrompt(row, "viduRef", value, redraw);
   const becameDirty = markRowDirty(row);
   if (field === "version") {
     row.version = value;
@@ -7033,6 +7487,12 @@ function parseClipboardAssets(text) {
 }
 
 function addAssetsToRow(row, assets) {
+  if (row.model === "gpt26" && row.outputFormat === "svg") {
+    row.error = "SVG 不支持参考图片，请先切换为 PNG 或 GIF";
+    persistRows();
+    render();
+    return;
+  }
   const imageAssets = normalizeAssets(assets).filter(asset => asset.type === "image");
   imageAssets.forEach(addUploadHistory);
   markRowDirty(row);
@@ -7042,6 +7502,10 @@ function addAssetsToRow(row, assets) {
 }
 
 function addAssetsToBatch(assets) {
+  if (state.batchDefaults?.model === "gpt26" && state.batchDefaults.outputFormat === "svg") {
+    alert("SVG 不支持参考图片，请先切换为 PNG 或 GIF");
+    return;
+  }
   const imageAssets = normalizeAssets(assets).filter(asset => asset.type === "image");
   imageAssets.forEach(addUploadHistory);
   state.batchImages = mergeAssets(state.batchImages, imageAssets, getBatchModel().maxImages);
@@ -8728,15 +9192,18 @@ function addUploadHistory(asset) {
 function openAssetDialog(rowId, filter) {
   state.choosingRowId = rowId;
   state.assetFilter = filter;
+  state.assetPage = 1;
   assetDialog.showModal();
   renderAssetDialog();
 }
 
 function renderAssetDialog() {
+  releasePreviewMedia(assetDialogGrid);
   assetDialog.querySelectorAll(".filter-chip[data-filter]").forEach(button => {
     button.classList.toggle("active", button.dataset.filter === state.assetFilter);
     button.onclick = () => {
       state.assetFilter = button.dataset.filter;
+      state.assetPage = 1;
       renderAssetDialog();
     };
   });
@@ -8745,6 +9212,7 @@ function renderAssetDialog() {
   favoriteFilter.setAttribute("aria-pressed", String(state.assetFavoritesOnly));
   favoriteFilter.onclick = () => {
     state.assetFavoritesOnly = !state.assetFavoritesOnly;
+    state.assetPage = 1;
     localStorage.setItem(STORAGE_KEYS.assetFavoritesOnly, state.assetFavoritesOnly ? "1" : "0");
     renderAssetDialog();
   };
@@ -8755,7 +9223,28 @@ function renderAssetDialog() {
     state.uploadFavorites,
     state.assetFavoritesOnly
   );
-  assetDialogGrid.innerHTML = list.length ? list.map(renderAssetCard).join("") : `<div class="meta-line">${state.assetFavoritesOnly ? "当前分类没有已收藏素材" : "没有可选素材"}</div>`;
+  const pageSize = 50;
+  const pages = Math.max(1, Math.ceil(list.length / pageSize));
+  state.assetPage = Math.max(1, Math.min(state.assetPage || 1, pages));
+  const visible = list.slice((state.assetPage - 1) * pageSize, state.assetPage * pageSize);
+  assetDialogGrid.innerHTML = visible.length ? visible.map(renderAssetCard).join("") : `<div class="meta-line">${state.assetFavoritesOnly ? "当前分类没有已收藏素材" : "没有可选素材"}</div>`;
+  let pager = assetDialog.querySelector("#assetDialogPages");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.id = "assetDialogPages";
+    pager.className = "pagination";
+    assetDialog.querySelector(".asset-dialog-toolbar").appendChild(pager);
+  }
+  pager.innerHTML = `<button type="button" class="tiny-button" data-asset-page="${state.assetPage - 1}" ${state.assetPage === 1 ? "disabled" : ""} aria-label="上一页">←</button><span class="meta-line">${state.assetPage} / ${pages} · ${list.length} 个素材</span><label class="meta-line">页 <input data-asset-page-input type="number" min="1" max="${pages}" value="${state.assetPage}" style="width:72px"></label><button type="button" class="tiny-button" data-asset-page="${state.assetPage + 1}" ${state.assetPage === pages ? "disabled" : ""} aria-label="下一页">→</button>`;
+  const go = page => {
+    state.assetPage = Math.max(1, Math.min(Number(page) || 1, pages));
+    renderAssetDialog();
+    assetDialogGrid.scrollTop = 0;
+  };
+  pager.querySelectorAll("[data-asset-page]").forEach(button => button.onclick = () => go(button.dataset.assetPage));
+  pager.querySelector("[data-asset-page-input]").onchange = event => go(event.target.value);
+  activateVisibleMedia(assetDialogGrid);
+  activateVisibleMedia(app);
   assetDialogGrid.querySelectorAll(".asset-card").forEach(card => {
     const asset = state.uploadHistory.find(item => item.id === card.dataset.assetId);
     const choose = () => {
@@ -8791,6 +9280,13 @@ function toggleUploadFavorite(item) {
 }
 
 function chooseAssetFromDialog(asset) {
+  if (state.choosingRowId === "audio:reference") {
+    const resolve = audioAssetPickerResolve;
+    audioAssetPickerResolve = null;
+    if (resolve) resolve(asset);
+    assetDialog.close();
+    return;
+  }
   if (String(state.choosingRowId || "").startsWith("multi:")) {
     const row = findMultiRow(String(state.choosingRowId).slice(6));
     if (row) addRefsToMultiRow(row, [asset]);
@@ -8864,7 +9360,7 @@ function renderAssetCard(item) {
   return `
     <article class="asset-card" data-asset-id="${escapeAttr(item.id)}" role="button" tabindex="0">
       <button class="favorite-button asset-card-favorite ${isFavorite ? "active" : ""}" data-asset-favorite="${escapeAttr(item.id)}" type="button" aria-label="${isFavorite ? "取消收藏" : "收藏"}" title="${isFavorite ? "取消收藏" : "收藏"}">${isFavorite ? "★" : "☆"}</button>
-      ${item.type === "video" ? `<video src="${escapeAttr(item.url)}"></video>` : item.type === "audio" ? `<audio src="${escapeAttr(item.url)}" controls></audio>` : item.type === "image" ? `<img src="${escapeAttr(item.preview || item.url)}" alt="">` : `<div class="meta-line">文件</div>`}
+      ${item.type === "video" ? `<video data-preview-src="${escapeAttr(item.url)}#t=0.1" preload="none" muted playsinline></video>` : item.type === "audio" ? `<audio src="${escapeAttr(item.url)}" controls preload="none"></audio>` : item.type === "image" ? `<img src="${escapeAttr(item.preview || item.url)}" loading="lazy" decoding="async" alt="">` : `<div class="meta-line">文件</div>`}
       <strong>${escapeHtml(item.name || shortUrl(item.url))}</strong>
       <span class="meta-line">${assetMeta(item)}</span>
       <span class="url-line">${escapeHtml(shortUrl(item.url))}</span>
@@ -8876,11 +9372,18 @@ function enqueueRows(rowsToSubmit) {
   rowsToSubmit.forEach(row => {
     if (isRowLocked(row)) return;
     clearRowCompletionTime(row);
-    if (!row.prompt.trim()) {
+    if (!row.prompt.trim() && getModel(row).requiresPrompt !== false) {
       row.status = "failed";
       row.error = "Prompt 不能为空";
       return;
     }
+    const validationError = getModel(row).validate?.(row);
+    if (validationError) {
+      row.status = "failed";
+      row.error = validationError;
+      return;
+    }
+    recordUsedPrompt(row, "image");
     cancelQueuedJobs(row.id);
     row.status = "queued";
     row.error = "";
@@ -9298,6 +9801,12 @@ function appendRowResult(row, data, payload, taskId) {
     version: row.version,
     size: row.size,
     quality: row.quality,
+    renderQuality: row.renderQuality,
+    background: row.background,
+    outputFormat: row.outputFormat,
+    frameSize: row.frameSize,
+    frameCount: row.frameCount,
+    frameDurationMs: row.frameDurationMs,
     images: cloneAssets(row.images),
     params: payload,
     results: urls
@@ -9348,6 +9857,7 @@ function enqueueImageVideoRows(rowsToSubmit) {
       row.error = validationError;
       return;
     }
+    recordUsedPrompt(row, "imageVideo");
     cancelImageVideoQueuedJobs(row.id, false);
     row.status = "queued";
     row.error = "";
@@ -9454,6 +9964,7 @@ function appendImageVideoRowResult(row, data, payload, taskId) {
     size: row.size,
     quality: row.quality,
     duration: row.duration,
+    outputFormat: row.outputFormat,
     autoMultiShot: row.autoMultiShot,
     generateAudio: row.generateAudio !== false,
     images: cloneAssets([row.firstFrame, row.lastFrame].filter(Boolean)),
@@ -9524,6 +10035,7 @@ function enqueueMotionRows(rowsToSubmit) {
       row.error = validationError;
       return;
     }
+    recordUsedPrompt(row, "motion");
     cancelMotionQueuedJobs(row.id, false);
     row.status = "queued";
     row.error = "";
@@ -9714,6 +10226,7 @@ function enqueueAvatarRows(rowsToSubmit) {
       row.error = validationError;
       return;
     }
+    recordUsedPrompt(row, "avatar");
     cancelAvatarQueuedJobs(row.id, false);
     row.status = "queued";
     row.error = "";
@@ -9918,6 +10431,7 @@ function enqueueMultiRows(rowsToSubmit) {
       row.error = validationError;
       return;
     }
+    recordUsedPrompt(row, "multiVideo");
     cancelMultiQueuedJobs(row.id, false);
     row.status = "queued";
     row.error = "";
@@ -10010,6 +10524,12 @@ function appendMultiRowResult(row, data, payload, taskId) {
   const urls = normalizeResults(data);
   appendUniqueResults(row, urls);
   markRemoteTaskComplete(row, taskId);
+  const sourceFollow = row.model === "kling3Omni" && payload?.generate_mode === "video_edit";
+  const sourceVideo = sourceFollow ? (row.refs || []).find(asset => asset.type === "video") : null;
+  const sourceWidth = Number(sourceVideo?.width || 0);
+  const sourceHeight = Number(sourceVideo?.height || 0);
+  const sourceDivisor = gcdNumber(sourceWidth, sourceHeight);
+  const sourceSize = sourceWidth > 0 && sourceHeight > 0 ? `${sourceWidth / sourceDivisor}:${sourceHeight / sourceDivisor}` : "";
   addGenerationHistory({
     id: uid("gen"),
     createdAt: Date.now(),
@@ -10019,12 +10539,17 @@ function appendMultiRowResult(row, data, payload, taskId) {
     origin: row.origin ? { ...row.origin } : null,
     executedBy: row.executedBy ? { ...row.executedBy } : null,
     prompt: row.prompt,
-    model: getMultiModel(row).label,
-    version: row.version,
-    size: row.size,
+    modelKey: row.model,
+    model: sourceFollow ? "Kling Omni 视频编辑" : getMultiModel(row).label,
+    version: sourceFollow ? "" : row.version,
+    sourceFollow,
+    size: sourceFollow ? sourceSize : row.size,
     quality: row.quality,
-    duration: row.duration,
+    duration: sourceFollow ? Number(sourceVideo?.duration || 0) || "" : row.duration,
+    outputFormat: row.outputFormat,
     generateAudio: row.generateAudio !== false,
+    klingMode: row.klingMode,
+    klingKeepVideoSound: row.klingKeepVideoSound !== false,
     images: cloneAssets(row.refs || []),
     refs: cloneAssets(row.refs || []),
     params: payload,
@@ -10091,6 +10616,7 @@ function enqueueViduRefRows(rowsToSubmit) {
       row.error = validationError;
       return;
     }
+    recordUsedPrompt(row, "viduRef");
     cancelViduRefQueuedJobs(row.id, false);
     row.status = "queued";
     row.error = "";
@@ -10418,7 +10944,30 @@ function statusLabel(row) {
   return `${labels[row.status] || row.status}${progress}`;
 }
 
+let historyDerivationCache = null;
+
+function withHistoryDerivations(callback) {
+  const previous = historyDerivationCache;
+  historyDerivationCache = { values: new Map(), recordKeys: new Map() };
+  try {
+    return callback();
+  } finally {
+    // Never retain derived records across edits, deletions or filter changes.
+    historyDerivationCache = previous;
+  }
+}
+
+function memoHistoryDerivation(key, compute) {
+  if (!historyDerivationCache) return compute();
+  if (!historyDerivationCache.values.has(key)) historyDerivationCache.values.set(key, compute());
+  return historyDerivationCache.values.get(key);
+}
+
 function renderHistoryPage() {
+  return withHistoryDerivations(renderHistoryPageContent);
+}
+
+function renderHistoryPageContent() {
   const workspace = document.querySelector("#workspace");
   workspace.innerHTML = `
     <section class="topbar">
@@ -10636,6 +11185,12 @@ function renderHistorySearchFilter() {
 }
 
 function bindHistoryPage() {
+  document.querySelectorAll("[data-history-group-page]").forEach(button => {
+    button.addEventListener("click", () => {
+      state.historyGroupResultPage = Number(button.dataset.historyGroupPage);
+      render();
+    });
+  });
   const historyActions = document.querySelector(".history-actions");
   if (historyActions && state.historyTab === "generations" && state.historyType === "image") {
     const selectedImageCount = selectedGenerationResultItems().filter(item => item.type === "image").length;
@@ -10774,6 +11329,7 @@ function bindHistoryPage() {
   document.querySelectorAll("[data-open-generation-group]").forEach(button => {
     button.addEventListener("click", () => {
       state.historyOpenGenerationGroup = state.historyOpenGenerationGroup === button.dataset.openGenerationGroup ? "" : button.dataset.openGenerationGroup;
+      state.historyGroupResultPage = 1;
       render();
     });
   });
@@ -11027,6 +11583,20 @@ function deleteGenerationResults(keys, options = {}) {
 function addGenerationResultToPending(item) {
   const record = item.record;
   const page = generationPageFromRecord(record);
+  if (page === "audio") {
+    state.activePage = "audio";
+    localStorage.setItem(STORAGE_KEYS.activePage, "audio");
+    render();
+    audioWorkbenchController.restoreInput(record);
+    return;
+  }
+  if (page === "avatarWorkflow") {
+    window.AvatarWorkflowUI.fromHistory(record);
+    state.activePage = page;
+    localStorage.setItem(STORAGE_KEYS.activePage, page);
+    render();
+    return;
+  }
   const row = createPendingRowFromGeneration(record, page);
   if (!row) {
     window.alert("这条历史结果不属于可重新加入队列的生成表格");
@@ -11049,6 +11619,12 @@ function createPendingRowFromGeneration(record, page) {
     size: record.size,
     quality: record.quality,
     duration: record.duration,
+    renderQuality: record.renderQuality ?? record.params?.image_quality,
+    background: record.background ?? record.params?.image_background,
+    outputFormat: record.outputFormat ?? record.params?.output_format,
+    frameSize: record.frameSize ?? record.params?.frame_size,
+    frameCount: record.frameCount ?? record.params?.frame_count,
+    frameDurationMs: record.frameDurationMs ?? record.params?.frame_duration_ms,
     count: 1,
     taskIds: [],
     results: [],
@@ -11093,7 +11669,9 @@ function createPendingRowFromGeneration(record, page) {
       ...common,
       refs: assets,
       model: multiModelKeyFromGeneration(record),
-      generateAudio: record.generateAudio !== false
+      generateAudio: record.generateAudio !== false,
+      klingMode: record.klingMode || record.params?.generate_mode,
+      klingKeepVideoSound: record.klingKeepVideoSound ?? record.params?.keep_video_sound
     });
   }
   if (page === "viduRef") {
@@ -11133,27 +11711,27 @@ function cloneDistinctImageVideoFrame(asset, field, used) {
 
 function addPendingRowToPage(row, page) {
   if (page === "image") {
-    state.rows.push(row);
+    prependRows(state.rows, [row]);
     state.scrollToImageRowId = row.id;
     persistRows();
   } else if (page === "imageVideo") {
-    state.imageVideoRows.push(row);
+    prependRows(state.imageVideoRows, [row]);
     state.scrollToImageVideoRowId = row.id;
     persistImageVideoRows();
   } else if (page === "motion") {
-    state.motionRows.push(row);
+    prependRows(state.motionRows, [row]);
     state.scrollToMotionRowId = row.id;
     persistMotionRows();
   } else if (page === "avatar") {
-    state.avatarRows.push(row);
+    prependRows(state.avatarRows, [row]);
     state.scrollToAvatarRowId = row.id;
     persistAvatarRows();
   } else if (page === "multiVideo") {
-    state.multiRows.push(row);
+    prependRows(state.multiRows, [row]);
     state.scrollToMultiRowId = row.id;
     persistMultiRows();
   } else if (page === "viduRef") {
-    state.viduRefRows.push(row);
+    prependRows(state.viduRefRows, [row]);
     state.scrollToViduRefRowId = row.id;
     persistViduRefRows();
   }
@@ -11162,16 +11740,25 @@ function addPendingRowToPage(row, page) {
 }
 
 function generationAssetsFromRecord(record) {
-  return normalizeAssets([
-    ...(record.refs || []),
-    ...(record.images || []),
-    record.firstFrame,
-    record.lastFrame
-  ].filter(Boolean));
+  // Refs preserve the submitted @ order; images/frames may mirror the same assets.
+  const primary = record.refs?.length ? record.refs : (record.images || []);
+  const assets = normalizeAssets(primary);
+  const keyOf = asset => `${asset.type}:${asset.url || asset.id}`;
+  const seen = new Set(assets.map(keyOf));
+  normalizeAssets([...(record.images || []), record.firstFrame, record.lastFrame].filter(Boolean)).forEach(asset => {
+    const key = keyOf(asset);
+    if (!seen.has(key)) {
+      assets.push(asset);
+      seen.add(key);
+    }
+  });
+  return assets;
 }
 
 function generationPageFromRecord(record) {
   const explicit = String(record.page || "");
+  if (explicit === "audio" || record.taskType === "audio") return "audio";
+  if (explicit === "avatarWorkflow") return explicit;
   if (["image", "imageVideo", "motion", "avatar", "multiVideo", "viduRef"].includes(explicit)) return explicit;
   if (["music", "viduVoice", "subjectLibrary"].includes(explicit)) return "";
   const modelText = String(record.model || "");
@@ -11215,11 +11802,13 @@ function avatarModelKeyFromGeneration(record) {
 }
 
 function multiModelKeyFromGeneration(record) {
+  if (MULTI_VIDEO_MODELS[record.modelKey]) return record.modelKey;
+  if (record.klingMode === "video_edit" || record.params?.generate_mode === "video_edit") return "kling3Omni";
   return modelKeyFromMap(record, MULTI_VIDEO_MODELS, "seedance");
 }
 
 function generationResultItems() {
-  return state.generationHistory.flatMap(record => (record.results || []).map((result, index) => {
+  return memoHistoryDerivation("results", () => state.generationHistory.flatMap(record => (record.results || []).map((result, index) => {
     const url = typeof result === "string" ? result : result?.url || JSON.stringify(result);
     return {
       key: generationResultKey(record.id, index),
@@ -11227,9 +11816,9 @@ function generationResultItems() {
       result,
       index,
       url,
-      type: guessType(url)
+      type: result?.type || record.outputs?.find(output => output.url === url)?.type || record.mediaType || guessType(url)
     };
-  }));
+  })));
 }
 
 function selectedGenerationResultItems() {
@@ -11351,51 +11940,82 @@ async function captureGenerationVideoFrame(key, button) {
 }
 
 async function captureHistoryVideoFrame(video, item, button) {
-  if (!video || !item?.url) return;
+  if (!video || !item?.url || video.frameCaptureController) return;
   const originalText = button?.textContent || "";
+  const controller = new AbortController();
+  video.frameCaptureController = controller;
+  if (button) button.frameCaptureController = controller;
+  const requestedTime = Number(video.currentTime || 0);
+  let stage = "读取视频画面";
+  let canvas;
   try {
     if (button) {
       button.disabled = true;
       button.textContent = "正在抽帧...";
     }
-    if (video.readyState < 2) {
-      await waitForMediaEvent(video, "loadeddata", 5000);
-    }
-    if (!video.videoWidth || !video.videoHeight) throw new Error("视频尺寸未读取完成");
     video.pause();
-    const canvas = document.createElement("canvas");
+    await waitForVideoFrame(video, controller.signal);
+    if (Math.abs(Number(video.currentTime || 0) - requestedTime) > 0.05) throw new Error("画面已切换，请在目标时间点重新截帧");
+    if (!video.videoWidth || !video.videoHeight) throw new Error("视频尺寸未读取完成");
+    stage = "截取当前帧";
+    canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const context = canvas.getContext("2d");
+    if (!context) throw new Error("无法创建截帧画布");
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const timeLabel = formatFrameTime(video.currentTime || 0);
+    const timeLabel = formatFrameTime(requestedTime);
     const fileName = `${fileNameFromUrl(item.url, "video").replace(/\.[^.]+$/, "")}_frame_${timeLabel}.jpg`;
     const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
-    const uploadedUrl = await uploadGeneratedImageBlob(blob, fileName);
-    addUploadHistory({
-      id: uid("asset"),
-      name: fileName,
-      url: uploadedUrl,
-      preview: uploadedUrl,
-      type: "image",
-      width: canvas.width,
-      height: canvas.height,
-      size: blob.size,
-      source: "video-frame",
-      createdAt: Date.now()
-    });
-    if (button) button.textContent = "已抽帧到上传缓存";
+    if (controller.signal.aborted) return;
+    stage = "上传截帧";
+    await uploadGeneratedImageBlob(blob, fileName);
+    if (button?.frameCaptureController === controller) button.textContent = "已抽帧到上传缓存";
   } catch (error) {
-    window.alert(`抽帧失败：${error.message || error}\n如果视频 CDN 不允许跨域读取画面，需要先下载视频再本地上传后抽帧。`);
-    if (button) button.textContent = originalText || "抽当前帧到上传缓存";
+    if (!controller.signal.aborted) {
+      const message = error.name === "SecurityError" ? "视频来源未允许跨域读取画面，无法在浏览器中截帧" : (error.message || error);
+      window.alert(`${stage}失败：${message}`);
+    }
+    if (button?.frameCaptureController === controller) button.textContent = originalText || "抽当前帧到上传缓存";
   } finally {
-    if (button) {
-      setTimeout(() => {
-        button.disabled = false;
-        button.textContent = originalText || "抽当前帧到上传缓存";
-      }, 1400);
+    if (canvas) canvas.width = canvas.height = 0;
+    if (video.frameCaptureController === controller) delete video.frameCaptureController;
+    if (button?.frameCaptureController === controller) {
+      button.frameCaptureController = null;
+      button.disabled = false;
     }
   }
+}
+
+function cancelHistoryFrameCapture(video) {
+  video?.frameCaptureController?.abort();
+  if (video) delete video.frameCaptureController;
+}
+
+function waitForVideoFrame(video, signal, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const events = ["loadeddata", "canplay", "seeked"];
+    const finish = error => {
+      clearTimeout(timer);
+      events.forEach(name => video.removeEventListener(name, check));
+      video.removeEventListener("error", onError);
+      video.removeEventListener("emptied", onEmpty);
+      signal?.removeEventListener("abort", onAbort);
+      if (error) reject(error); else resolve();
+    };
+    const check = () => { if (video.readyState >= 2 && !video.seeking) finish(); };
+    const onError = () => finish(new Error("视频加载失败，请确认资源链接仍可访问"));
+    const onEmpty = () => finish(new Error("视频已关闭或切换"));
+    const onAbort = () => finish(new DOMException("Frame capture canceled", "AbortError"));
+    const timer = setTimeout(() => finish(new Error("等待视频画面超时")), timeout);
+    events.forEach(name => video.addEventListener(name, check));
+    video.addEventListener("error", onError);
+    video.addEventListener("emptied", onEmpty);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    else if (video.error) onError();
+    else check();
+  });
 }
 
 function canvasToBlob(canvas, type = "image/jpeg", quality = 0.92) {
@@ -11480,27 +12100,35 @@ function filteredUploadRecords() {
 }
 
 function filteredGenerationResultItems() {
+  const keyword = String(state.historySearch || "").trim().toLowerCase();
   return generationResultItems().filter(item => {
     if (item.type !== state.historyType) return false;
     if (!HISTORY_ORIGIN_UTILS.matchesOrigin(item.record, state.historyOrigin)) return false;
     if (state.historyFavoritesOnly && !state.generationFavorites.has(item.key)) return false;
     if (state.historyModel && state.historyModel !== "all" && generationModelKey(item.record) !== state.historyModel) return false;
     if (state.historySize && state.historySize !== "all" && generationSizeKey(item.record) !== state.historySize) return false;
-    const keyword = String(state.historySearch || "").trim().toLowerCase();
     if (keyword && !String(item.record?.prompt || "").toLowerCase().includes(keyword)) return false;
     return true;
   });
 }
 
 function filteredGenerationInputGroups() {
-  return generationInputGroupsFromItems(filteredGenerationResultItems());
+  const key = JSON.stringify(["groups", state.historyType, state.historyOrigin, state.historyFavoritesOnly,
+    state.historyModel, state.historySize, state.historySearch]);
+  return memoHistoryDerivation(key, () => generationInputGroupsFromItems(filteredGenerationResultItems()));
 }
 
 function generationInputGroupsFromItems(items) {
   const groups = new Map();
+  const recordKeys = historyDerivationCache?.recordKeys || new Map();
   items.forEach(item => {
-    const signature = generationInputSignature(item.record);
-    const id = `g_${hashText(signature)}`;
+    let recordKey = recordKeys.get(item.record);
+    if (!recordKey) {
+      const signature = generationInputSignature(item.record);
+      recordKey = { signature, id: `g_${hashText(signature)}` };
+      recordKeys.set(item.record, recordKey);
+    }
+    const { signature, id } = recordKey;
     const existing = groups.get(id);
     if (existing) {
       existing.items.push(item);
@@ -11539,6 +12167,16 @@ function generationInputSignature(record) {
     size: record?.size || "",
     quality: record?.quality || "",
     duration: record?.duration || "",
+    renderQuality: record?.renderQuality ?? record?.params?.image_quality ?? "",
+    background: record?.background ?? record?.params?.image_background ?? "",
+    outputFormat: record?.outputFormat ?? record?.params?.output_format ?? "",
+    frameSize: record?.frameSize ?? record?.params?.frame_size ?? "",
+    frameCount: record?.frameCount ?? record?.params?.frame_count ?? "",
+    frameDurationMs: record?.frameDurationMs ?? record?.params?.frame_duration_ms ?? "",
+    generateAudio: record?.generateAudio ?? record?.params?.generate_audio ?? true,
+    params: record?.params || {},
+    klingMode: record?.klingMode || "",
+    klingKeepVideoSound: record?.klingKeepVideoSound,
     count: record?.count || "",
     voiceId: record?.voiceId || "",
     offPeak: Boolean(record?.offPeak),
@@ -11740,6 +12378,7 @@ function renderGenerationInputGroupCard(group) {
       <button class="tiny-button history-group-toggle" data-open-generation-group="${escapeAttr(group.id)}" type="button">${isOpen ? "收起结果" : `查看全部 ${group.items.length} 个结果`}</button>
       ${renderGenerationPromptSummary(item)}
       ${renderHistoryOriginBadge(record)}
+      ${renderGenerationAuditDetails(record)}
       <span class="meta-line">${escapeHtml(record.model || "未知模型")} · ${escapeHtml(record.version || "未知版本")} · 尺寸 ${record.size || "空"} · 清晰度 ${record.quality || "空"}</span>
       <span class="meta-line">${typeLabel(item.type)} · ${new Date(record.createdAt).toLocaleString()} · 共 ${group.items.length} 个结果</span>
       <div class="history-card-actions">
@@ -11747,9 +12386,21 @@ function renderGenerationInputGroupCard(group) {
         ${item.type === "image" ? `<button class="tiny-button" data-send-generation-upload="${escapeAttr(item.key)}" type="button">首个加入上传缓存</button>` : ""}
         <button class="tiny-button success" data-add-generation-row="${escapeAttr(item.key)}" type="button">添加到生成队列行</button>
       </div>
-      ${isOpen ? `<div class="generation-group-results">${group.items.map(renderGenerationGroupResultCard).join("")}</div>` : ""}
+      ${isOpen ? renderGenerationGroupResults(group) : ""}
     </article>
   `;
+}
+
+function renderGenerationGroupResults(group) {
+  const totalPages = Math.max(1, Math.ceil(group.items.length / HISTORY_PAGE_SIZE));
+  const page = state.historyGroupResultPage = clampHistoryPage(state.historyGroupResultPage, totalPages);
+  const items = group.items.slice((page - 1) * HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE);
+  return `<div class="generation-group-results">${items.map(renderGenerationGroupResultCard).join("")}</div>
+    ${totalPages > 1 ? `<div class="history-pagination">
+      <button class="button" type="button" data-history-group-page="${page - 1}" title="上一页结果" aria-label="上一页结果" ${page <= 1 ? "disabled" : ""}>&larr;</button>
+      <span class="meta-line">${page} / ${totalPages}</span>
+      <button class="button" type="button" data-history-group-page="${page + 1}" title="下一页结果" aria-label="下一页结果" ${page >= totalPages ? "disabled" : ""}>&rarr;</button>
+    </div>` : ""}`;
 }
 
 function inputGroupTitle(group) {
@@ -11865,6 +12516,30 @@ function renderGenerationPromptSummary(item) {
   `;
 }
 
+function historyAuditValue(value) {
+  if (Array.isArray(value)) return value.map(historyAuditValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/(?:authorization|api.?key|token|password|secret|credential)/i.test(key))
+    .map(([key, child]) => [key, historyAuditValue(child)]));
+  return value;
+}
+
+function renderGenerationAuditDetails(record) {
+  const assets = generationAssetsFromRecord(record).map(asset => ({
+    name: asset.name, type: asset.type, url: asset.url, sourcePath: asset.sourcePath,
+    width: asset.width, height: asset.height, duration: asset.duration,
+    size: asset.size, sha256: asset.sha256, role: asset.role
+  }));
+  const details = historyAuditValue({
+    source: record.origin, executedBy: record.executedBy,
+    agentTaskId: record.agentTaskId, upstreamTaskId: record.upstreamTaskId || record.taskId,
+    assets, settings: record.request?.input?.options || record.originalInput?.options || {},
+    requestPayload: record.params || {},
+    originalPrompt: record.originalInput?.prompt ?? record.prompt
+  });
+  return `<details class="history-audit-details"><summary>素材与完整参数</summary><pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre></details>`;
+}
+
 function renderHistoryPreview(item) {
   if (item.type === "video") {
     return `
@@ -11893,7 +12568,7 @@ function renderHistoryPreview(item) {
     const title = item.name || fileNameFromUrl(item.url, "video");
     return `
       <button class="history-video-thumb" data-open-history-video="${escapeAttr(token)}" type="button" title="${escapeAttr(title)}">
-        <video class="history-video-poster" src="${escapeAttr(item.url)}#t=0.1" preload="metadata" muted playsinline></video>
+        <video class="history-video-poster" data-preview-src="${escapeAttr(item.url)}#t=0.1" preload="none" muted playsinline></video>
         <span class="history-video-play">▶</span>
         <span>${escapeHtml(title)}</span>
       </button>
@@ -12101,11 +12776,11 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
   const prevButton = overlay.querySelector("[data-history-viewer-prev]");
   const nextButton = overlay.querySelector("[data-history-viewer-next]");
 
-  const renderToken = nextToken => {
+  const renderToken = nextToken => withHistoryDerivations(() => {
     const firstEntry = findHistoryMediaByToken(nextToken, preferredType);
     const list = firstEntry ? historyMediaNavigationItems(firstEntry, source) : historyMediaItems(preferredType || state.historyType);
     const entry = list.find(item => item.token === nextToken || item.item?.url === firstEntry?.item?.url) || firstEntry;
-    if (!entry) return;
+    if (!entry?.item?.url || !["image", "video"].includes(entry.item.type)) return false;
     const groupedTargets = source === "history" && entry.item?.key
       ? groupedHistoryNavigationTargets(generationHistoryNavigationGroups(entry.item.type), entry)
       : null;
@@ -12116,6 +12791,10 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
     overlay.dataset.currentSource = source;
     title.textContent = entry.title;
     openLink.href = entry.item.url;
+    cancelHistoryFrameCapture(video);
+    captureButton.frameCaptureController = null;
+    captureButton.disabled = false;
+    captureButton.textContent = "抽当前帧到上传缓存";
     video.pause();
     if (isVideo) {
       image.removeAttribute("src");
@@ -12125,6 +12804,7 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
       video.load();
     } else if (isImage) {
       video.removeAttribute("src");
+      video.load();
       video.hidden = true;
       image.hidden = false;
       image.src = entry.item.url;
@@ -12186,11 +12866,36 @@ function openHistoryMediaViewer(token, source = "history", preferredType = "") {
         if (index >= 0 && index < list.length - 1) renderToken(list[index + 1].token);
       };
     }
-  };
+    return true;
+  });
 
+  if (!renderToken(token)) return;
+  overlay.previewSession ||= {};
+  releasePreviewMedia(app);
+  releasePreviewMedia(assetDialogGrid);
   overlay.classList.add("open");
-  renderToken(token);
-  overlay.requestFullscreen?.().catch(() => {});
+  requestHistoryViewerFullscreen(overlay);
+}
+
+function requestHistoryViewerFullscreen(overlay) {
+  if (!overlay.classList.contains("open") || !overlay.dataset.currentToken) return;
+  if (document.fullscreenElement === overlay) return;
+  try {
+    Promise.resolve(overlay.requestFullscreen?.()).then(() => {
+      if (!overlay.classList.contains("open") && document.fullscreenElement === overlay) {
+        exitHistoryViewerFullscreen(overlay);
+      }
+    }).catch(() => {});
+  } catch (_) {
+    // A denied fullscreen request must leave the in-page preview usable.
+  }
+}
+
+function exitHistoryViewerFullscreen(overlay) {
+  if (document.fullscreenElement !== overlay) return;
+  try {
+    Promise.resolve(document.exitFullscreen?.()).catch(() => {});
+  } catch (_) {}
 }
 
 function ensureHistoryVideoOverlay() {
@@ -12238,8 +12943,25 @@ function ensureHistoryVideoOverlay() {
   if (viewer && !overlay.querySelector("[data-history-viewer-details]")) {
     viewer.insertAdjacentHTML("beforeend", `<div class="history-video-viewer-details" data-history-viewer-details></div>`);
   }
+  let backdropPressed = false;
+  overlay.addEventListener("pointerdown", event => { backdropPressed = event.target === overlay; });
+  overlay.addEventListener("pointercancel", () => { backdropPressed = false; });
   overlay.addEventListener("click", event => {
-    if (event.target === overlay) closeHistoryVideoOverlay(overlay);
+    const close = backdropPressed && event.target === overlay;
+    backdropPressed = false;
+    if (close) closeHistoryVideoOverlay(overlay);
+  });
+  let fullscreenSession = null;
+  document.addEventListener("fullscreenchange", () => {
+    const fullscreen = document.fullscreenElement;
+    if (fullscreen === overlay || (fullscreen && overlay.contains(fullscreen))) {
+      fullscreenSession = overlay.previewSession;
+      if (!overlay.classList.contains("open")) exitHistoryViewerFullscreen(overlay);
+    } else if (fullscreenSession) {
+      const departedSession = fullscreenSession;
+      fullscreenSession = null;
+      if (departedSession === overlay.previewSession) closeHistoryVideoOverlay(overlay);
+    }
   });
   overlay.querySelector("[data-history-viewer-close]").addEventListener("click", () => closeHistoryVideoOverlay(overlay));
   document.addEventListener("keydown", event => {
@@ -12269,11 +12991,12 @@ function renderHistoryMediaViewerDetails(item) {
     ["模型版本", record.version || ""],
     ["尺寸", record.size || ""],
     ["清晰度", record.quality || ""],
-    ["时长", record.duration ? `${record.duration}s` : ""],
+    ["时长", String(record.duration) === "-1" ? renderOptionLabel(record.duration) : (record.duration ? `${record.duration}s` : "")],
     ["Seed", record.seed || (Array.isArray(record.returnedSeeds) ? record.returnedSeeds.join(", ") : "")],
     ["任务ID", record.taskId || (Array.isArray(record.taskIds) ? record.taskIds.join(", ") : "")]
   ].filter(([, value]) => String(value || "").trim());
   return `
+    ${renderGenerationAuditDetails(record)}
     <div class="history-viewer-detail-grid">
       ${params.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join("")}
     </div>
@@ -12293,6 +13016,8 @@ function renderHistoryVideoViewerDetails(item) {
 
 function pageLabel(page) {
   const labels = {
+    audio: "声音生成",
+    avatarWorkflow: "数字人工作流",
     image: "生图",
     imageVideo: "图文生视频",
     motion: "动作模仿",
@@ -12348,11 +13073,24 @@ function stepHistoryVideoFrame(video, direction) {
 function closeHistoryVideoOverlay(overlay) {
   const target = overlay || document.querySelector(".history-video-overlay");
   if (!target) return;
-  target.querySelector("[data-history-viewer-video]")?.pause();
-  target.classList.remove("open");
-  if (document.fullscreenElement === target) {
-    document.exitFullscreen?.().catch(() => {});
+  const video = target.querySelector("[data-history-viewer-video]");
+  cancelHistoryFrameCapture(video);
+  const captureButton = target.querySelector("[data-history-viewer-capture]");
+  if (captureButton) {
+    captureButton.frameCaptureController = null;
+    captureButton.disabled = false;
   }
+  if (video) unloadPreviewMedia(video);
+  target.querySelector("[data-history-viewer-image]")?.removeAttribute("src");
+  target.querySelector("[data-history-viewer-details]")?.replaceChildren();
+  target.querySelectorAll("button").forEach(button => { button.onclick = null; });
+  delete target.dataset.currentToken;
+  delete target.dataset.currentSource;
+  delete target.previewSession;
+  target.classList.remove("open");
+  exitHistoryViewerFullscreen(target);
+  activateVisibleMedia(app);
+  if (assetDialog.open) activateVisibleMedia(assetDialogGrid);
 }
 
 function bindDownloadButtons() {
@@ -12977,7 +13715,7 @@ function valueForRunningHubBinding(binding, context) {
 }
 
 async function resolveRunningHubWorkflowInputs(row, config, assets = {}) {
-  const apiKey = runningHubMotionApiKey();
+  const apiKey = runningHubMotionApiKey(config);
   const uploads = {
     image: assets.image ? await uploadRunningHubAsset(assets.image, apiKey, "image") : "",
     video: assets.video ? await uploadRunningHubAsset(assets.video, apiKey, "video") : "",
@@ -13008,7 +13746,7 @@ async function buildRunningHubPayload(row, config, assets) {
 
   if (/^\/api\/runninghub\/run/i.test(String(config.endpoint || ""))) {
     return {
-      apiKey: runningHubMotionApiKey(),
+      apiKey: runningHubMotionApiKey(config),
       appId: webappId,
       requestBody: common,
       nodeInfoList
@@ -13017,7 +13755,7 @@ async function buildRunningHubPayload(row, config, assets) {
 
   const payload = {
     webappId,
-    apiKey: runningHubMotionApiKey(),
+    apiKey: runningHubMotionApiKey(config),
     inputs: nodeInfoList,
     nodeInfoList,
     clientId: String(config.clientId || DEFAULT_RUNNINGHUB_MOTION_CONFIG.clientId),
@@ -13402,10 +14140,14 @@ function insertMentionIntoPrompt(textarea, token) {
   const after = textarea.value.slice(end);
   const prefix = before && !/\s$/.test(before) ? " " : "";
   const suffix = after && !/^\s/.test(after) ? " " : "";
-  textarea.value = `${before}${prefix}${token}${suffix}${after}`;
+  const scrollTop = textarea.scrollTop;
+  const scrollLeft = textarea.scrollLeft;
+  textarea.setRangeText(`${prefix}${token}${suffix}`, start, end, "end");
   const nextPos = before.length + prefix.length + token.length + suffix.length;
-  textarea.focus();
+  textarea.focus({ preventScroll: true });
   textarea.setSelectionRange(nextPos, nextPos);
+  textarea.scrollTop = scrollTop;
+  textarea.scrollLeft = scrollLeft;
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -13983,7 +14725,7 @@ async function createRowFromAgentTask(task, controls, resolvedAssets = null) {
     assets: resolvedAssets || input.assets || {}
   });
   const row = pipeline.create(mapped.row);
-  pipeline.rows().push(row);
+  prependRows(pipeline.rows(), [row]);
   pipeline.persist();
   render();
   return { row, pipeline, created: true };
@@ -14098,6 +14840,8 @@ function cancelAgentTask(agentTaskId) {
 }
 
 async function initializeAgentWorker() {
+  await loadAgentApiSettings();
+  refreshAgentSettingsStatus();
   if (!AGENT_RUNTIME || !AGENT_TASK_ADAPTER) {
     console.warn("Agent browser worker scripts are unavailable");
     return null;
@@ -14142,6 +14886,15 @@ function showFatalError(error) {
 }
 
 async function bootstrapApp() {
+  window.addEventListener("pagehide", () => {
+    flushInlinePromptSaves();
+    flushPromptDetailPersist();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") return;
+    flushInlinePromptSaves();
+    flushPromptDetailPersist();
+  });
   confirmPasteBtn.addEventListener("click", () => {
     const prompts = parseBatchPrompts(pasteText.value);
     if (!prompts.length) {
@@ -14149,11 +14902,12 @@ async function bootstrapApp() {
       return;
     }
     const defaults = normalizeBatchDefaults(readBatchDefaultsFromControls());
-    prompts.forEach(prompt => state.rows.push(createRow({
+    const rows = prompts.map(prompt => createRow({
       ...defaults,
       prompt,
       images: cloneAssets(state.batchImages)
-    })));
+    }));
+    prependRows(state.rows, rows);
     pasteText.value = "";
     pasteDialog.close();
     persistRows();
@@ -14165,6 +14919,8 @@ async function bootstrapApp() {
   persistViduRefRows();
   persistAvatarRows();
   await initializeHistoryStorage();
+  await initializeSharedRunningHub();
+  initializePromptLibrary();
   resumeInterruptedRemoteTasks();
   render();
   await initializeAgentWorker();

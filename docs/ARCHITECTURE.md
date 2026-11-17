@@ -2,7 +2,7 @@
 
 ## Overview
 
-APIplusWebtools is a local-first, dependency-free web application. The browser owns the interface, task queues, most provider adapters, and local state. A small Node.js service supplies static files, a disk history backup, and selected local proxy routes.
+APIplusWebtools is a local-first, dependency-free web application and CLI. The browser owns its interface, manual task queues, and local state. The Node service supplies static files, shared history, selected local proxies, and background Agent execution through shared model contracts.
 
 ```mermaid
 flowchart LR
@@ -35,11 +35,12 @@ flowchart LR
 
 ### Local Node service
 
-`server.cjs` has three responsibilities:
+`server.cjs` has four responsibilities:
 
 1. Serve repository files from the local directory.
 2. Read and atomically write the structured history backup through `/api/local/history`.
 3. Proxy RunningHub upload, submit, and query operations through `/api/runninghub/*`.
+4. Execute supported Agent tasks through `agent-headless.cjs`, persist upload/task/history events, and resume polling without a browser. `workbench-model-catalog.cjs` exposes shared model choices and payload rules.
 
 It is not a general credential vault, database server, or media archive. It binds to `127.0.0.1` unless the operator explicitly changes `HOST`.
 
@@ -87,8 +88,8 @@ The same history data is mirrored in IndexedDB and the disk backup. Merge logic 
 
 `scripts/build-portable.ps1` copies only an explicit allowlist. It then:
 
-- replaces the source API Base default with an empty value;
-- creates empty `data` and `runtime` directories;
+- preserves the approved company API Base and neutral node templates, not personal credentials;
+- creates an empty `data` directory; `runtime` is empty unless an explicit Node executable and license are supplied;
 - excludes Git metadata, browser data, history files, logs, generated archives, and planning notes;
 - includes launchers, source, tests, engineering docs, and this Agent guide.
 
@@ -96,22 +97,22 @@ The same history data is mirrored in IndexedDB and the disk backup. Merge logic 
 
 ## Local Agent Execution Plane
 
-`agent-service.cjs` exposes an authenticated, loopback-only append API. It persists task and history events before acknowledging writes. Agents never call providers directly.
+`agent-service.cjs` exposes a loopback-only append API. The bundled CLI is admitted locally without manual token configuration; existing bearer-token clients remain compatible. It persists task and history events before acknowledging writes. Agents use the workbench rather than calling providers directly.
 
 ```mermaid
 flowchart LR
-  A["Codex / Minimax Code"] -->|Bearer token| L["Local Agent API"]
+  A["Codex / Minimax Code CLI"] -->|Loopback client| L["Local Agent API"]
   L --> J["Append-only task journal"]
-  B["Open browser tab"] -->|claim / heartbeat| L
+  L --> B["Background Node executor"]
   B --> G["Configured company gateway"]
   B -->|progress / results / history| L
   L --> H["Unified history metadata"]
 ```
 
-The browser worker validates the task against its live model catalogs, stages local assets, creates the normal UI row, and uses the existing queue/provider adapters. Browser and Agent records share the same history view but retain separate `origin` and `executedBy` metadata.
+The background executor validates tasks against the shared model catalog, uploads staged assets, submits jobs, and persists upstream IDs before polling. Browser and Agent records share the same history view but retain `origin` and `executedBy` metadata. The browser worker remains a compatibility path; supported headless jobs do not depend on it.
 
-Task journals distinguish `waiting_for_worker`, active execution, resumable `polling`, and non-retriable `submission-unknown`. A refresh with upstream IDs resumes polling; a lost lease during submission is not automatically replayed.
+Task journals distinguish compatibility `waiting_for_worker`, active execution, resumable `polling`, and non-retriable `submission-unknown`. Restart with upstream IDs resumes polling; uncertain submission is not automatically replayed. CLI `recreate` is a deliberate new draw with a fresh request ID, not recovery of a lost poll.
 
-The Agent store contains structured metadata and remote URLs, not full generated media. Staged input files are temporary and are removed after the browser worker consumes them. Agent routes have no delete/history-overwrite operation; destructive history actions remain in the browser control plane.
+The Agent store contains structured metadata and remote URLs, not full generated media. Upload history includes original filename, source path, SHA-256, media metadata, and Agent origin. Task history includes complete original input, prompt/options, upstream IDs, progress, errors, and results. Staged input files are temporary and removed after consumption. Agent routes have no delete/history-overwrite operation; destructive actions remain in the browser control plane.
 
 Remote access is represented by `API_BATCH_REMOTE_ACCESS=false` but is not implemented or enabled in this release.

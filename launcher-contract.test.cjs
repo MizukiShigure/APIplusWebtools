@@ -118,7 +118,7 @@ assert(start.includes("%APPDATA%\\npm\\pm2.cmd"), "launcher must discover AppDat
 assert(start.includes("%APPDATA%\\npm\\node_modules\\pm2\\bin\\pm2"), "launcher must discover AppData PM2 JS entry");
 assert(start.includes("startOrReload ecosystem.config.cjs --only api-plus-webtools"), "launcher must use idempotent PM2 reload");
 assert(start.includes("%NODE_EXE%") && start.includes("PM2_JS"), "JS-only PM2 entries must run through the discovered Node");
-assert(start.includes("start \"Internal API Batch Server\" /min"), "launcher must retain minimized Node fallback");
+assert(start.includes("launcher-node.ps1") && readRequired("launcher-node.ps1").includes("-WindowStyle Hidden"), "launcher must retain a hidden, logged Node fallback");
 assert(!start.includes('findstr ":%PORT%"') && !stop.includes('findstr ":%PORT%"'), "launchers must not prefix-match a port with findstr");
 assert(portQuery, "launcher-port-query.ps1 is missing");
 assert(start.includes("launcher-port-query.ps1") && stop.includes("launcher-port-query.ps1"), "launchers must use the exact-port query helper");

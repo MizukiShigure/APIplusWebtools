@@ -1,15 +1,23 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
+if exist "%~dp0.workbench-local.json" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup_Workbench.ps1" -Action stop
+  exit /b
+)
 if not defined PORT set "PORT=4198"
 set "NODE_EXE="
 set "PM2_CMD="
 set "PM2_JS="
 
-where node >nul 2>nul
-if not errorlevel 1 set "NODE_EXE=node"
-if not defined NODE_EXE if exist "%~dp0runtime\node.exe" set "NODE_EXE=%~dp0runtime\node.exe"
+if exist "%~dp0runtime\node.exe" set "NODE_EXE=%~dp0runtime\node.exe"
+if not defined NODE_EXE (
+  where node >nul 2>nul
+  if not errorlevel 1 set "NODE_EXE=node"
+)
 if not defined NODE_EXE if exist "C:\Program Files\nodejs\node.exe" set "NODE_EXE=C:\Program Files\nodejs\node.exe"
+
+if exist "%~dp0runtime\node.exe" if /I not "%API_BATCH_USE_PM2%"=="1" goto STOP_LOCAL
 
 if exist "%~dp0node_modules\.bin\pm2.cmd" set "PM2_CMD=%~dp0node_modules\.bin\pm2.cmd"
 if not defined PM2_CMD if exist "%~dp0node_modules\.bin\pm2" set "PM2_JS=%~dp0node_modules\.bin\pm2"
@@ -30,6 +38,7 @@ if /I "%PM2_OWNER%"=="current" (
   if defined PM2_JS if defined NODE_EXE "%NODE_EXE%" "%PM2_JS%" delete api-plus-webtools
 )
 
+:STOP_LOCAL
 call :QUERY_LISTENER
 if defined HAS_OTHER_LISTENER echo Port %PORT% is in use by another program and was not stopped.
 if defined LEGACY_PIDS (
@@ -45,7 +54,7 @@ if defined PROJECT_PIDS (
   if not defined HAS_OTHER_LISTENER if not defined LEGACY_PIDS echo No matching local server is listening on port %PORT%.
 )
 :FINISH
-pause
+if /I not "%API_BATCH_NO_PAUSE%"=="1" pause
 exit /b 0
 
 :QUERY_PM2_OWNER

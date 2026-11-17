@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Internal API Batch Console</title>
-  <link rel="stylesheet" href="./styles.css?v=release-20260803-asset-picker-favorites-dedup">
+  <link rel="stylesheet" href="./styles.css?v=release-20260921-history-performance">
 </head>
 <body>
   <div id="app"></div>
@@ -53,6 +53,30 @@
             <span>清晰度</span>
             <select id="batchQuality"></select>
           </label>
+          <label class="field" hidden>
+            <span>渲染质量</span>
+            <select id="batchRenderQuality"></select>
+          </label>
+          <label class="field" hidden>
+            <span>背景</span>
+            <select id="batchBackground"></select>
+          </label>
+          <label class="field" hidden>
+            <span>输出格式</span>
+            <select id="batchOutputFormat"></select>
+          </label>
+          <label class="field" hidden>
+            <span>GIF 帧尺寸</span>
+            <select id="batchFrameSize"></select>
+          </label>
+          <label class="field" hidden>
+            <span>GIF 帧数</span>
+            <input id="batchFrameCount" type="number" min="2" max="16" step="1" value="9">
+          </label>
+          <label class="field" hidden>
+            <span>每帧时长 (ms)</span>
+            <input id="batchFrameDurationMs" type="number" min="20" max="2000" step="10" value="200">
+          </label>
           <label class="field">
             <span>一次生成数量</span>
             <input id="batchCount" type="number" min="1" step="1" value="1">
@@ -94,12 +118,23 @@ PROMPT&gt;&gt;&gt;"></textarea>
     </form>
   </dialog>
 
-  <script src="./model-contracts.js?v=release-20260730-seedance2-image-video"></script>
+  <link rel="stylesheet" href="./prompt-library.css?v=release-20260914-models-prompts-performance">
+  <script src="./prompt-library.js?v=release-20260914-models-prompts-performance"></script>
+  <script src="./prompt-library-panel.js?v=release-20260914-models-prompts-performance"></script>
+  <script src="./model-contracts.js?v=update-20261115-image-models"></script>
   <script src="./prompt-detail-utils.js?v=release-20260730-prompt-editor"></script>
   <script src="./history-origin-utils.js?v=release-20260801-origin-history"></script>
   <script src="./asset-history-utils.js?v=release-20260803-asset-picker-favorites-dedup"></script>
-  <script src="./agent-task-adapter.js?v=release-20260801-local-agent-adapter"></script>
-  <script src="./agent-runtime.js?v=release-20260801-local-agent-worker"></script>
-  <script src="./app.js?v=release-20260803-asset-picker-favorites-dedup"></script>
+  <script src="./agent-task-adapter.js?v=update-20261115-image-models"></script>
+  <script src="./agent-runtime.js?v=release-20260914-models-prompts-performance"></script>
+  <link rel="stylesheet" href="./avatar-workflow-ui.css?v=20260921-avatar-header">
+  <script src="./runninghub-shared.js?v=20260920-avatar-workflow"></script>
+  <script src="./avatar-workflow-production.js?v=20260921-avatar-tabs"></script>
+  <script src="./avatar-workflow-ui.js?v=20260921-avatar-header"></script>
+  <link rel="stylesheet" href="./audio-workbench-ui.css?v=20261023">
+  <script src="./audio-models.js?v=20261023"></script>
+  <script src="./workbench-browser-client.js?v=20261023"></script>
+  <script src="./audio-workbench-ui.js?v=20261023"></script>
+  <script src="./app.js?v=update-20261115-image-models"></script>
 </body>
 </html>

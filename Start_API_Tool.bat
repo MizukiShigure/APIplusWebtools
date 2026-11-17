@@ -2,6 +2,11 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+if exist "%~dp0.workbench-local.json" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup_Workbench.ps1" -Action open
+  exit /b
+)
+
 if not defined PORT set "PORT=4198"
 set "HOST=127.0.0.1"
 set "API_BATCH_REMOTE_ACCESS=false"
@@ -18,13 +23,14 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-set "URL=http://127.0.0.1:%PORT%/?v=release-20260801-agent-api"
+set "URL=http://127.0.0.1:%PORT%/"
 set "NODE_EXE="
 
-where node >nul 2>nul
-if not errorlevel 1 set "NODE_EXE=node"
-
-if not defined NODE_EXE if exist "%~dp0runtime\node.exe" set "NODE_EXE=%~dp0runtime\node.exe"
+if exist "%~dp0runtime\node.exe" set "NODE_EXE=%~dp0runtime\node.exe"
+if not defined NODE_EXE (
+  where node >nul 2>nul
+  if not errorlevel 1 set "NODE_EXE=node"
+)
 if not defined NODE_EXE if exist "C:\Program Files\nodejs\node.exe" set "NODE_EXE=C:\Program Files\nodejs\node.exe"
 
 if not defined NODE_EXE (
@@ -36,6 +42,7 @@ if not defined NODE_EXE (
 
 set "PM2_CMD="
 set "PM2_JS="
+if exist "%~dp0runtime\node.exe" if /I not "%API_BATCH_USE_PM2%"=="1" goto NODE_FALLBACK
 if exist "%~dp0node_modules\.bin\pm2.cmd" set "PM2_CMD=%~dp0node_modules\.bin\pm2.cmd"
 if not defined PM2_CMD if exist "%~dp0node_modules\.bin\pm2" set "PM2_JS=%~dp0node_modules\.bin\pm2"
 if not defined PM2_CMD if not defined PM2_JS if exist "%~dp0node_modules\pm2\bin\pm2" set "PM2_JS=%~dp0node_modules\pm2\bin\pm2"
@@ -72,7 +79,11 @@ if defined QUERY_FAILED goto PORT_CHECK_FAILED
 if defined HAS_OTHER_LISTENER goto PORT_CONFLICT
 if defined PROJECT_PIDS goto OPEN_PAGE
 
-start "Internal API Batch Server" /min "%NODE_EXE%" "%~dp0server.cjs"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0launcher-node.ps1" -NodeExe "%NODE_EXE%" -ProjectServerPath "%~dp0server.cjs" -DataDir "%API_BATCH_DATA_DIR%"
+if errorlevel 1 (
+  echo Could not launch Node. Check the data directory permissions.
+  exit /b 1
+)
 echo Starting local server...
 for /l %%I in (1,1,20) do (
   timeout /t 1 /nobreak >nul
@@ -151,5 +162,5 @@ exit /b 1
 
 :OPEN_PAGE
 echo Internal API Batch is running at %URL%
-start "" "%URL%"
+if /I not "%API_BATCH_NO_BROWSER%"=="1" start "" "%URL%"
 exit /b 0

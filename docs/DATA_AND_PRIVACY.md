@@ -39,11 +39,7 @@ The local server mirrors history to:
 data/history.json
 ```
 
-If the application directory is not writable, it falls back to:
-
-```text
-%APPDATA%\Internal_API_Batch\history.json
-```
+Writes use the configured shared data directory. A primary write failure is reported to the caller; it does not write a fallback copy to AppData. Existing `%APPDATA%\Internal_API_Batch\history.json` files remain read-only recovery sources and are not deleted.
 
 Writes are atomic: a temporary file is written and then renamed.
 
@@ -94,7 +90,7 @@ The distribution builder is allowlist-based. A generated ZIP contains:
 
 - source files and launchers;
 - engineering documentation and tests;
-- empty `data/.keep` and `runtime/.keep` placeholders.
+- empty `data/.keep` and `runtime/.keep` placeholders; full Windows builds additionally include only the explicitly supplied runtime executable, license, and build manifest.
 
 It excludes:
 
@@ -104,7 +100,7 @@ It excludes:
 - API keys and personal workflow configuration;
 - logs, recovery exports, Git metadata, and generated archives.
 
-The builder also rewrites the packaged API Base default to empty. `portable-package.test.cjs` scans the expanded package and a package rebuilt from that package to enforce these guarantees.
+The builder preserves the approved company API Base and neutral node templates. It does not read browser storage or local configuration. `portable-package.test.cjs` scans the expanded source package and a rebuilt package; `portable-runtime.test.cjs` can additionally verify the explicit runtime and license.
 
 ## Operator Guidance
 
@@ -121,10 +117,12 @@ The launcher chooses one authoritative server data directory:
 - Portable ZIP: the package's `data` directory.
 - Explicit override: `API_BATCH_DATA_DIR`.
 
-It contains `history.json`, append-only task/history journals and snapshots, the local Agent token file, and temporary staged inputs. It does not copy completed remote image/video/audio bodies. Temporary staging files are consumed and removed by the browser worker.
+It contains `history.json`, append-only task/history journals and snapshots, optional compatibility Agent authentication, and temporary staged inputs. It does not copy completed remote image/video/audio bodies. Temporary staging files are consumed and removed by the executor. Upload records include original filename, local source path, SHA-256, media metadata, and Agent identity; task records include full prompt/options/input, provider IDs, progress/errors, and results so another draw can be traced to its inputs.
 
 Stop the service before backup or migration, then copy the entire selected data directory as one unit. Restore it beside the matching project install before startup. Keep this directory private because task prompts, source labels, remote URLs, and the Agent bearer token are sensitive.
 
 Browser `localStorage` and IndexedDB remain scoped by browser profile, hostname, and port. The disk history bridge allows history metadata to merge back after refresh, but clearing a browser profile can still remove unsynced rows/settings. Do not replace a populated disk file with an empty browser export.
 
-Agent callers are append-only and cannot remove history. Only explicit manual browser actions can delete records. Rotating the Agent token invalidates old Agent clients and does not erase history.
+Agent callers are append-only and cannot remove history. Only explicit manual browser actions can delete records. The local CLI does not need token configuration. Compatibility token rotation does not erase history. Tokenless local access does not permit LAN/public binding.
+
+Full skill releases embed the clean allowlisted workbench ZIP with runtime and license; the archive never contains its own generated skill ZIP. The separate lightweight local skill contains its intentional fixed installation path, but no application, runtime, credentials, uploads, or history. It is excluded from the portable workbench archive so another machine receives no maintainer paths.

@@ -5,9 +5,11 @@ const path = require("node:path");
 
 const {
   KLING_3_OMNI,
+  KLING_3_OMNI_EDIT,
   MINIMAX_H3,
   SEEDANCE_2,
   buildKling3OmniPayload,
+  buildKling3OmniEditPayload,
   buildMiniMaxH3FirstLastPayload,
   buildMiniMaxH3MultiPayload,
   buildSeedance2FirstLastPayload,
@@ -15,6 +17,7 @@ const {
   nearestQualityOption,
   seedance2QualityOptions,
   validateKling3OmniRow,
+  validateKling3OmniEditRow,
   validateMiniMaxH3FirstLastRow,
   validateMiniMaxH3MultiRow
 } = contracts;
@@ -38,7 +41,9 @@ assert.deepEqual(KLING_3_OMNI, {
   version: "kling-v3-omni",
   sizes: ["16:9", "9:16", "1:1"],
   qualities: ["720p", "1080p"],
-  durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
+  durations: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+  defaultQuality: "1080p",
+  defaultDuration: "10"
 });
 
 assert.deepEqual(seedance2QualityOptions("doubao-seedance-2-0-260128"), ["480p", "720p", "1080p", "4k"]);
@@ -50,7 +55,9 @@ assert.deepEqual(SEEDANCE_2, {
   version: "doubao-seedance-2-0-260128",
   sizes: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
   qualities: ["480p", "720p", "1080p", "4k"],
-  durations: ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
+  durations: ["4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
+  defaultQuality: "1080p",
+  defaultDuration: "10"
 });
 
 const seedance2FirstLastPayload = buildSeedance2FirstLastPayload({
@@ -172,6 +179,91 @@ assert.match(validateKling3OmniRow(row({ refs: [{ ...video, fps: 23 }] })), /24.
 assert.equal(validateKling3OmniRow(row({ refs: [{ type: "video", url: "https://cdn.example/upload", name: "upload" }] })), "");
 assert.equal(validateKling3OmniRow(row({ refs: [{ type: "image", url: "https://cdn.example/upload", name: "upload" }] })), "");
 
+// The company gateway's edit branch uses source-following sentinels and does
+// not serialize the multi-reference model, aspect or sound-generation fields.
+assert.equal(typeof validateKling3OmniEditRow, "function", "Kling video editing needs a separate validator");
+assert.equal(typeof buildKling3OmniEditPayload, "function");
+assert.deepEqual(KLING_3_OMNI_EDIT, {
+  endpoint: "/kling_video_omni",
+  queryEndpoint: "/kling_video_omni_query",
+  generateMode: "video_edit",
+  qualities: ["720p", "1080p"],
+  defaultQuality: "1080p",
+  maxImages: 4,
+  minVideoDuration: 3,
+  maxVideoDuration: 10,
+  minVideoEdge: 720,
+  maxVideoEdge: 2160,
+  maxVideoBytes: 200 * 1024 * 1024,
+  maxImageBytes: 10 * 1024 * 1024
+});
+const editRow = (overrides = {}) => row({
+  klingMode: "video_edit",
+  prompt: "Edit @1 using @2.",
+  refs: [video, image],
+  klingKeepVideoSound: true,
+  ...overrides
+});
+assert.equal(validateKling3OmniEditRow(editRow()), "");
+assert.equal(validateKling3OmniRow(editRow({ size: "4:3", duration: "8.375" })), "");
+assert.deepEqual(buildKling3OmniEditPayload(editRow({ size: "4:3", duration: "8.375" })), {
+  prompt: "Edit <<video_1>> using <<image_1>>.",
+  generate_mode: "video_edit",
+  reference_images: [image.url],
+  reference_video: video.url,
+  duration: 0,
+  keep_video_sound: true,
+  mode: "pro",
+  aspect_ratio: ""
+});
+assert.deepEqual(buildKling3OmniPayload(editRow()), buildKling3OmniEditPayload(editRow()));
+assert.equal(buildKling3OmniEditPayload(editRow({ generateAudio: false })).keep_video_sound, true);
+assert.equal(buildKling3OmniEditPayload(editRow({ klingKeepVideoSound: false })).keep_video_sound, false);
+assert.equal(buildKling3OmniEditPayload(editRow({ klingKeepVideoSound: undefined })).keep_video_sound, true);
+assert.equal(buildKling3OmniEditPayload(editRow({ quality: "720p" })).mode, "std");
+assert.equal(buildKling3OmniEditPayload(editRow({ quality: "std" })).mode, "std");
+assert.equal(buildKling3OmniEditPayload(editRow({ quality: "pro" })).mode, "pro");
+assert.match(validateKling3OmniEditRow(editRow({ quality: "4k" })), /清晰度/);
+assert.equal(buildKling3OmniEditPayload(editRow({ prompt: "  Edit @2 using @1.  ", refs: [image, video] })).prompt,
+  "Edit <<video_1>> using <<image_1>>.");
+assert.equal(buildKling3OmniEditPayload(editRow({ prompt: "Edit <<video_1>> using <<image_1>>." })).prompt,
+  "Edit <<video_1>> using <<image_1>>.");
+assert.match(validateKling3OmniEditRow(editRow({ prompt: "Edit @3" })), /@3.*素材/);
+assert.match(validateKling3OmniEditRow(editRow({ prompt: "Edit <<video_2>>" })), /video_2.*素材/);
+assert.match(validateKling3OmniEditRow(editRow({ prompt: "" })), /Prompt.*不能为空/);
+assert.match(validateKling3OmniEditRow(editRow({ prompt: "x".repeat(3073) })), /3072/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [] })), /必须.*一个.*视频/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [image] })), /必须.*一个.*视频/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, video] })), /只能.*一个.*视频/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { type: "audio", url: "https://cdn.example/a.mp3" }] })), /音频/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { type: "other", url: "https://cdn.example/a.dat" }] })), /素材类型/);
+assert.equal(validateKling3OmniEditRow(editRow({ refs: [video, ...Array(4).fill(image)] })), "");
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, ...Array(5).fill(image)] })), /4.*图片/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [{ ...video, url: "" }, image] })), /URL/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [{ ...video, url: "file:///source.mp4" }, image] })), /HTTP/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [{ ...video, url: "https://cdn.example/a.webm" }, image] })), /MP4.*MOV/);
+for (const metadata of [
+  { duration: 2.999 }, { duration: 10.001 },
+  { width: 719 }, { height: 719 }, { width: 2161 }, { height: 2161 },
+  { size: 200 * 1024 * 1024 + 1 }
+]) assert.notEqual(validateKling3OmniEditRow(editRow({ refs: [{ ...video, ...metadata }, image] })), "");
+for (const metadata of [
+  { duration: 3, width: 720, height: 2160 },
+  { duration: 10, width: 2160, height: 720, size: 200 * 1024 * 1024 },
+  { width: 1440, height: 1080 }, { width: 1080, height: 1440 }
+]) assert.equal(validateKling3OmniEditRow(editRow({ refs: [{ ...video, ...metadata }, image] })), "");
+for (const field of ["duration", "width", "height"]) {
+  assert.match(validateKling3OmniEditRow(editRow({ refs: [{ ...video, [field]: undefined }, image] })), /元数据/);
+}
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { ...image, url: "https://cdn.example/a.webp" }] })), /JPG.*PNG/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { ...image, width: 299 }] })), /300/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { ...image, width: 300, height: 751 }] })), /比例/);
+assert.match(validateKling3OmniEditRow(editRow({ refs: [video, { ...image, size: 10 * 1024 * 1024 + 1 }] })), /10MB/);
+assert.equal(validateKling3OmniEditRow(editRow({ refs: [video, { ...image, width: 300, height: 750, size: 10 * 1024 * 1024 }] })), "");
+assert.throws(() => buildKling3OmniEditPayload(editRow({ refs: [] })), /必须.*一个.*视频/);
+assert.throws(() => buildKling3OmniPayload(editRow({ refs: [] })), /必须.*一个.*视频/);
+assert.deepEqual(buildKling3OmniEditPayload(editRow({ prompt: "Edit @1", refs: [video] })).reference_images, []);
+
 assert.deepEqual(MINIMAX_H3, {
   endpoint: "/minimax_h3",
   queryEndpoint: "/minimax_h3_query",
@@ -180,8 +272,8 @@ assert.deepEqual(MINIMAX_H3, {
   qualities: ["768P", "2K"],
   durations: ["5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"],
   defaultSize: "9:16",
-  defaultQuality: "768P",
-  defaultDuration: "5",
+  defaultQuality: "2K",
+  defaultDuration: "10",
   maxRefs: 12,
   maxReferenceVideoDuration: 15
 });
@@ -279,11 +371,19 @@ assert.equal(validateMiniMaxH3MultiRow({
     { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7 }
   ]
 }), "");
+assert.equal(validateMiniMaxH3MultiRow({
+  ...h3MultiRow,
+  refs: [
+    { type: "video", url: "https://cdn.example/h3-a.mp4", duration: 8 },
+    { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7.49 },
+    { type: "audio", url: "https://cdn.example/h3-audio.mp3", duration: 14.9 }
+  ]
+}), "");
 assert.match(validateMiniMaxH3MultiRow({
   ...h3MultiRow,
   refs: [
     { type: "video", url: "https://cdn.example/h3-a.mp4", duration: 8 },
-    { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7.1 }
+    { type: "video", url: "https://cdn.example/h3-b.mp4", duration: 7.51 }
   ]
 }), /15/);
 assert.equal(validateMiniMaxH3MultiRow({
@@ -300,7 +400,7 @@ const multiVideoModelsSource = appSource.slice(
   appSource.indexOf("const MULTI_VIDEO_MODELS"),
   appSource.indexOf("const VIDU_REF_VIDEO_MODEL")
 );
-const seedanceModelSource = multiVideoModelsSource.split("minimaxH3:")[0];
+const seedanceModelSource = multiVideoModelsSource.slice(multiVideoModelsSource.indexOf("  seedance: {")).split("minimaxH3:")[0];
 const imageVideoModelsSource = appSource.slice(
   appSource.indexOf("const IMAGE_VIDEO_MODELS"),
   appSource.indexOf("const MULTI_VIDEO_MODELS")
@@ -322,9 +422,12 @@ assert.match(imageVideoModelsSource, /seedance:\s*\{[\s\S]*?build\(row\)\s*\{[\s
 assert.match(appSource, /function buildSeedance2Payload\(row\)[\s\S]*?resolution: row\.quality \|\| undefined/, "Seedance multimodal requests must send the selected resolution");
 assert.match(appSource, /function renderMultiParamsCell\(row, model, disabled\)[\s\S]*?model\.supportsGenerateAudio[\s\S]*?generateAudio/);
 assert.match(appSource, /function updateMultiRowField\(row, field, value, redraw = true\)\s*\{\s*if \(field === "generateAudio" && !getMultiModel\(row\)\.supportsGenerateAudio\) return;/);
-assert.match(pageSource, /<script src="\.\/model-contracts\.js[^>]*><\/script>\s*<script src="\.\/prompt-detail-utils\.js[^>]*><\/script>\s*<script src="\.\/history-origin-utils\.js[^>]*><\/script>\s*<script src="\.\/asset-history-utils\.js[^>]*><\/script>\s*<script src="\.\/agent-task-adapter\.js[^>]*><\/script>\s*<script src="\.\/agent-runtime\.js[^>]*><\/script>\s*<script src="\.\/app\.js/, "model contracts, asset history, Agent adapters, and prompt utilities must load before app.js");
-assert.match(pageSource, /model-contracts\.js\?v=release-20260730-seedance2-image-video/, "Seedance 2 image-video fix must bypass cached model metadata");
-assert.match(pageSource, /app\.js\?v=release-20260803-asset-picker-favorites-dedup/, "Current application fixes must bypass cached application code");
+const scripts = [...pageSource.matchAll(/<script src="\.\/([^"?]+)[^"]*"/g)].map(match => match[1]);
+for (const dependency of ["model-contracts.js", "prompt-detail-utils.js", "history-origin-utils.js", "asset-history-utils.js", "agent-task-adapter.js", "agent-runtime.js", "runninghub-shared.js", "avatar-workflow-ui.js"]) {
+  assert.ok(scripts.includes(dependency) && scripts.indexOf(dependency) < scripts.indexOf("app.js"), `${dependency} must load before app.js`);
+}
+assert.match(pageSource, /model-contracts\.js\?v=update-20261115-image-models/, "Current models must bypass cached model metadata");
+assert.match(pageSource, /app\.js\?v=update-20261115-image-models/, "Current application fixes must bypass cached application code");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");

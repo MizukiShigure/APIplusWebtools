@@ -1,11 +1,20 @@
 # Local runtime and dependencies
 node_modules/
+.workbench-local.json
+.workbench-backups/
+.workbench-downloads/
+.env
+.env.*
+!.env.example
+.planning/
+skills/local-api-workbench/
 runtime/*
 !runtime/.keep
 
 # Generated packages
 dist/
 *.zip
+test-screenshots/
 
 # User data and private local cache
 data/
@@ -28,6 +37,10 @@ Thumbs.db
 
 # Local implementation planning notes
 docs/superpowers/plans/
+docs/research/
+docs/superpowers/specs/*
+!docs/superpowers/specs/2026-09-20-avatar-workflow-design.md
+!docs/superpowers/specs/2026-09-20-avatar-independent-stages-design.md
 findings.md
 progress.md
 task_plan.md

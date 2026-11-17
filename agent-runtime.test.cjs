@@ -30,6 +30,42 @@ test("uses bounded exponential reconnect delays", () => {
   assert.equal(reconnectDelay(20), 30000);
 });
 
+test("honors heartbeatMs while polling claims and cancellation every claim tick", async t => {
+  let clock = 1_800_000_000_000;
+  const startedAt = clock;
+  const heartbeats = [];
+  let claims = 0;
+  const canceled = [];
+  const worker = createWorker({
+    now: () => clock,
+    heartbeatMs: 10000,
+    claimMs: 1500,
+    fetchImpl: async url => {
+      if (url.endsWith("/heartbeat")) heartbeats.push(clock - startedAt);
+      if (url.endsWith("/claim")) {
+        claims += 1;
+        return jsonResponse(200, { task: null, cancelTaskIds: claims === 2 ? ["cancel-between-heartbeats"] : [] });
+      }
+      return jsonResponse(200, { success: true, leaseMs: 30000 });
+    },
+    getCapabilities: () => ({ taskFamilies: [] }),
+    executeTask: async () => assert.fail("no task should execute"),
+    cancelTask: taskId => canceled.push({ taskId, at: clock - startedAt }),
+    acquirePageLease: () => true,
+    autoSchedule: false
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  for (let tick = 0; tick < 40; tick += 1) {
+    await worker.runOnce();
+    clock += 1500;
+  }
+  t.diagnostic(`heartbeat metric: simulated_ms=60000 claims=${claims} heartbeats=${heartbeats.length}`);
+  assert.equal(claims, 40);
+  assert.deepEqual(heartbeats, [0, 10500, 21000, 31500, 42000, 52500]);
+  assert.deepEqual(canceled, [{ taskId: "cancel-between-heartbeats", at: 1500 }]);
+});
+
 test("normalizes reports without allowing unknown states", () => {
   assert.deepEqual(normalizeWorkerReport({ state: "partial", upstreamTaskIds: [1], results: ["x"] }), {
     state: "partial",
@@ -37,6 +73,70 @@ test("normalizes reports without allowing unknown states", () => {
     results: ["x"]
   });
   assert.throws(() => normalizeWorkerReport({ state: "mystery" }), /invalid worker task state/i);
+});
+
+test("schedules heartbeat renewal within short leases and resets on restart", async t => {
+  let clock = 0;
+  let scheduled;
+  let heartbeats = 0;
+  const worker = createWorker({
+    now: () => clock,
+    heartbeatMs: 10000,
+    claimMs: 1500,
+    fetchImpl: async url => {
+      if (url.endsWith("/heartbeat")) heartbeats += 1;
+      return jsonResponse(200, { success: true, leaseMs: 1000, task: null });
+    },
+    setTimeoutFn: (callback, delay) => { scheduled = { callback, delay }; return 1; },
+    clearTimeoutFn: () => {},
+    getCapabilities: () => ({ taskFamilies: [] }),
+    executeTask: async () => {},
+    acquirePageLease: () => true
+  });
+  t.after(() => worker.stop());
+  await worker.start();
+  await scheduled.callback();
+  assert.equal(heartbeats, 1);
+  assert.ok(scheduled.delay <= 1000 / 3);
+  clock = 334;
+  await scheduled.callback();
+  assert.equal(heartbeats, 2);
+  worker.stop();
+  await worker.start();
+  await scheduled.callback();
+  assert.equal(heartbeats, 3);
+});
+
+test("re-registers on claim authentication loss between heartbeats", async t => {
+  for (const status of [401, 404]) {
+    await t.test(`HTTP ${status}`, async () => {
+      let clock = 0;
+      const calls = [];
+      let claims = 0;
+      const worker = createWorker({
+        now: () => clock,
+        fetchImpl: async url => {
+          calls.push(url.split("/").pop());
+          if (url.endsWith("/claim") && ++claims === 2) return jsonResponse(status, { error: "test-restart" });
+          return jsonResponse(200, { success: true, leaseMs: 30000, task: null });
+        },
+        getCapabilities: () => ({ taskFamilies: [] }),
+        executeTask: async () => {},
+        acquirePageLease: () => true,
+        autoSchedule: false
+      });
+      await worker.start();
+      await worker.runOnce();
+      clock += 1500;
+      await worker.runOnce();
+      assert.deepEqual(calls, ["session", "register", "heartbeat", "claim", "claim", "session", "register", "claim"]);
+      assert.equal(worker.getState().connection, "online");
+      clock += 1500;
+      await worker.runOnce();
+      assert.deepEqual(calls.slice(-2), ["heartbeat", "claim"]);
+      worker.stop();
+    });
+  }
 });
 
 test("registers, heartbeats, claims, and hands a task to the existing browser executor", async () => {
@@ -134,4 +234,3 @@ test("backs off after connection failure without losing the worker identity", as
   assert.equal(worker.getState().reconnectAttempt, 1);
   assert.equal(statuses.at(-1).connection, "offline");
 });
-

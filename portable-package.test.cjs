@@ -5,6 +5,13 @@ const path = require("path");
 
 const root = __dirname;
 const expectedFiles = [
+  "Setup_Workbench.ps1",
+  "Setup_Workbench.bat",
+  "scripts/workbench-manage.cjs",
+  "scripts/check-public-source.cjs",
+  "workbench-manage.test.cjs",
+  "workbench-sync-integration.test.cjs",
+  "docs/GIT_WORKFLOW.md",
   ".gitignore",
   "AGENTS.md",
   "CHANGELOG.md",
@@ -27,8 +34,50 @@ const expectedFiles = [
   "agent-skill-package.test.cjs",
   "agent-task-adapter.js",
   "agent-task-adapter.test.cjs",
+  "agent-headless.cjs",
+  "local-media-metadata.cjs",
+  "local-media-metadata.test.cjs",
+  "agent-headless.test.cjs",
+  "headless-client.test.cjs",
+  "workbench-model-catalog.cjs",
+  "workbench-model-catalog.test.cjs",
+  "workbench-browser-client.js",
+  "workbench-browser-client.test.cjs",
+  "workbench-ui-integration.test.cjs",
+  "agent-audio-adapter.test.cjs",
+  "audio-models.js",
+  "audio-models.test.cjs",
+  "audio-workbench-ui.js",
+  "audio-workbench-ui.css",
+  "audio-workbench-ui.test.cjs",
+  "audio-workbench-browser.test.cjs",
+  "kling-edit-ui.test.cjs",
+  "skill-release.test.cjs",
+  "history-audit.test.cjs",
   "agent-ui-contract.test.cjs",
   "agent-worker-integration.test.cjs",
+  "avatar-workflow-store.cjs",
+  "avatar-workflow-store.test.cjs",
+  "avatar-workflow-media.cjs",
+  "avatar-workflow-media.test.cjs",
+  "avatar-workflow-service.cjs",
+  "avatar-workflow-service.test.cjs",
+  "avatar-workflow-server.test.cjs",
+  "avatar-workflow-ui.js",
+  "avatar-workflow-production.js",
+  "avatar-workflow-production.test.cjs",
+  "avatar-workflow-production-races.test.cjs",
+  "avatar-workflow-ui.css",
+  "avatar-workflow-ui.test.cjs",
+  "avatar-workflow-browser.test.cjs",
+  "runninghub-shared.js",
+  "runninghub-shared.test.cjs",
+  "docs/AVATAR_WORKFLOW.md",
+  "docs/superpowers/specs/2026-09-20-avatar-workflow-design.md",
+  "docs/superpowers/specs/2026-09-20-avatar-independent-stages-design.md",
+  "skills/api-plus-agent/references/avatar-workflow.md",
+  "skills/api-plus-agent/references/portable-setup.md",
+  "skills/api-plus-agent/scripts/run-workbench.ps1",
   "app.js",
   "asset-history-integration.test.cjs",
   "asset-history-utils.js",
@@ -55,10 +104,15 @@ const expectedFiles = [
   "launcher-contract.test.cjs",
   "launcher-pm2-owner.ps1",
   "launcher-port-query.ps1",
+  "launcher-node.ps1",
+  "portable-runtime.test.cjs",
+  "docs/LOCAL_DEPLOYMENT.md",
+  "docs/AGENT_DEPLOYMENT.md",
   "local-event-store.cjs",
   "local-event-store.test.cjs",
   "model-contracts.js",
   "model-contracts.test.cjs",
+  "midjourney-model-versions.test.cjs",
   "package.json",
   "portable-package.test.cjs",
   "prompt-detail-utils.js",
@@ -69,6 +123,7 @@ const expectedFiles = [
   "row-completion-time.test.cjs",
   "runtime-behavior.test.cjs",
   "scripts/build-portable.ps1",
+  "scripts/build-skills.ps1",
   "server-agent-integration.test.cjs",
   "server.cjs",
   "skills/api-plus-agent/SKILL.md",
@@ -77,7 +132,23 @@ const expectedFiles = [
   "skills/api-plus-agent/scripts/api-plus-agent-client.mjs",
   "start_multimodal_video_dev.bat",
   "styles.css",
-  "ui-layout-contract.test.cjs"
+  "ui-layout-contract.test.cjs",
+  "models-25.test.cjs",
+  "models-25-integration.test.cjs",
+  "asset-picker-layout.test.cjs",
+  "prompt-edit-performance.test.cjs",
+  "history-performance.test.cjs",
+  "history-performance-browser.test.cjs",
+  "prompt-library.js",
+  "prompt-library-panel.js",
+  "prompt-library.css",
+  "prompt-library-store.cjs",
+  "prompt-library.test.cjs",
+  "prompt-library-store.test.cjs",
+  "video-model-defaults.test.cjs",
+  "runninghub-auth.cjs",
+  "runninghub-auth.test.cjs",
+  "docs/MODELS_AND_PROMPT_LIBRARY.md"
 ].sort();
 
 function assert(condition, message) {
@@ -105,7 +176,8 @@ function assertNoLiteralCredentials(text) {
   while ((match = assignment.exec(text))) {
     const value = match[2].trim();
     if (match[1] === "`" && value.includes("${")) continue;
-    assert(placeholder.test(value), `portable package leaked literal credential assignment: ${match[0]}`);
+    const referenceMention = /^token\s*:\s*["']@\d+["']$/i.test(match[0]);
+    assert(placeholder.test(value) || referenceMention, `portable package leaked literal credential assignment: ${match[0]}`);
   }
 }
 
@@ -143,8 +215,8 @@ const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
-  assert(version === "v2026.08.03-asset-picker.1", "VERSION must contain the release tag");
-  assert(changelog.includes("v2026.08.03-asset-picker.1"), "changelog must include the release tag");
+  assert(version === "v2026.11.18-git-agent-sync.1", "VERSION must contain the release identifier");
+  assert(changelog.includes(version), "changelog must include the release identifier");
   assert(packageJson.scripts.start === "node server.cjs", "package start script must launch server.cjs");
   assert(packageJson.scripts.test.includes("portable-package.test.cjs"), "package test script must verify the distributable");
   assert(fs.existsSync(builder), "portable builder is missing");
@@ -167,6 +239,7 @@ try {
   assert(JSON.stringify(actualFiles) === JSON.stringify(expectedFiles), `unexpected portable contents: ${actualFiles.join(", ")}`);
   assert(!actualFiles.some(file => /(^|\/)(?:docs\/superpowers|task_plan\.md|findings\.md|progress\.md)$/i.test(file)), "portable package must not include planning notes");
   assert(!actualFiles.some(file => /(?:agent-auth\.json|\.jsonl$|\/staging\/|\/journals?\/)/i.test(file)), "portable package must not include tokens, journals, or staged media");
+  assert(!actualFiles.some(file => /(?:^|\/)(?:local-api-workbench|workbench\.zip|SKILL_RELEASE\.json)(?:\/|$)/i.test(file)), "portable workbench must not contain local-machine skills or recursive generated packages");
   for (const folder of ["data", "runtime"]) {
     const entries = fs.readdirSync(path.join(expandedPath, folder));
     assert(entries.length === 1 && entries[0] === ".keep", `${folder} must contain only .keep`);
@@ -230,9 +303,10 @@ try {
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");
   assert(/if not exist "\.git"/i.test(updateScript), "Update_From_Git.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(updateScript), "Update_From_Git.bat must explain that a Git clone is required in a ZIP install");
-  assert(restoreScript.includes("v2026.08.03-asset-picker.1"), "Restore_Version.bat must show the current release tag example");
+  assert(restoreScript.includes("existing version tag"), "Restore_Version.bat must request an existing tag rather than assuming a local version was published");
 
   console.log("portable-package checks passed");
+  require("./portable-runtime.test.cjs");
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

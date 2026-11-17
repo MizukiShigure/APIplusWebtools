@@ -129,7 +129,7 @@ The API key is user-supplied runtime configuration. Trim whitespace before placi
 
 ## Local Agent API
 
-The supported automation boundary is `http://127.0.0.1:4198/api/agent/v1`. Authenticate with the environment-provided bearer token shown in the browser's Agent API settings. Do not embed the token in task payloads or source files.
+The supported automation boundary is `http://127.0.0.1:4198/api/agent/v1`. The bundled local CLI works without manual token configuration and automatically starts the hidden service. Loopback/browser-origin checks still apply. Existing bearer clients remain compatible; never embed credentials in task inputs or source files.
 
 | Method | Route | Contract |
 | --- | --- | --- |
@@ -138,11 +138,19 @@ The supported automation boundary is `http://127.0.0.1:4198/api/agent/v1`. Authe
 | POST | `/tasks` | Idempotent task envelope keyed by `clientTaskId` |
 | GET | `/tasks/:id` | Task state, upstream IDs, progress, results and errors |
 | GET | `/tasks/:id/events` | Append-only events after an optional sequence |
-| POST | `/tasks/:id/cancel` | Provider cancellation when configured, otherwise local cancellation |
+| POST | `/tasks/:id/cancel` | Local cancellation; do not infer that a remote job or its billing stopped |
 | GET | `/history?taskId=...` | Unified result metadata for one task |
 
-Supported task families are `image`, `imageVideo`, `motion`, `multiVideo`, and `avatar`. Clients must query capabilities before constructing model-specific input. See [the bundled Agent reference](../skills/api-plus-agent/references/agent-api.md) for the envelope and asset-key map.
+Supported task families are advertised dynamically, including `image`, `imageVideo`, `motion`, `multiVideo`, `avatar`, and `audio`. Clients must query capabilities before constructing model-specific input. See [the bundled Agent reference](../skills/api-plus-agent/references/agent-api.md) for the envelope and asset-key map.
 
 The API intentionally has no Agent delete endpoint. Keep `clientTaskId` stable across retries; changing it creates a new logical generation request.
 
-The browser worker automatically obtains a fresh same-origin control session and re-registers after the local service restarts. Tasks that already have upstream IDs resume polling; a task interrupted while submitting without an upstream ID becomes `submission-unknown` and is never auto-resubmitted.
+The background executor runs supported tasks without a browser. Tasks that already have upstream IDs resume polling after service restart; a task interrupted while submitting without an upstream ID becomes `submission-unknown` and is never auto-resubmitted. `history`/`events` inspect the persisted work; `recreate` deliberately starts a new draw linked to the original input.
+
+### Kling source-video editing
+
+Select `multiVideo` with Kling editing mode `options.klingMode: "video_edit"` and `options.klingKeepVideoSound`. Supply exactly one source video in `assets.refs`, with known duration, width, and height, and up to four images. Current gateway limits are MP4/MOV, 3–10 seconds, each edge 720–2160 pixels, at most 200 MB. Image references are JPG/JPEG/PNG, at most 10 MB, minimum edge 300 pixels, ratio 0.4–2.5.
+
+The editing route follows the source through `duration: 0` and `aspect_ratio: ""`; it omits `model_name` and generic `sound`. This gateway contract does not prove a selectable 3.0 editing backend. Keep the label `Kling Omni 视频编辑`, preserve reference order, and distinguish live job evidence from documented route/parameter checks.
+
+For explicit Kling Omni video generation ratios, the verified options are `16:9`, `9:16`, and `1:1`; the deployed gateway also exposes an empty/omitted ratio choice for applicable source-following workflows. This is different from Omni image generation, which supports `4:3` and `3:4` among its image sizes. An empty ratio control does not prove a particular nonstandard video output size without generating and inspecting that output.

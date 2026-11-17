@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { probeLocalMedia } = require("./local-media-metadata.cjs");
 const {
   createEventStore,
   createHistoryState,
@@ -181,6 +182,8 @@ function applyTaskEvent(currentState, event) {
       task.completedAt = event.completedAt || now;
       task.leaseExpiresAt = 0;
     }
+  } else if (event.type === "task-execution-updated") {
+    task.execution = clone(event.execution);
   }
   task.updatedAt = now;
   return state;
@@ -188,6 +191,14 @@ function applyTaskEvent(currentState, event) {
 
 function normalizeTaskInput(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? clone(value) : {};
+}
+
+function safeTaskMetadata(value) {
+  if (Array.isArray(value)) return value.map(safeTaskMetadata);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
+    /^(api[_-]?key|authorization|token|secret|password)$/i.test(key) && child && !String(child).startsWith("@shared:")
+      ? "[runtime credential]" : safeTaskMetadata(child)]));
 }
 
 function normalizeHistoryRecord(record, task, worker) {
@@ -202,7 +213,7 @@ function normalizeHistoryRecord(record, task, worker) {
   } else {
     result.origin = normalizeOrigin(result.origin, { client: "web", id: "legacy-browser", label: "Legacy browser" });
   }
-  if (worker) result.executedBy = { type: "browser", id: worker.id, label: worker.label || worker.id };
+  if (worker) result.executedBy = { type: worker.type || "browser", id: worker.id, label: worker.label || worker.id };
   return result;
 }
 
@@ -231,6 +242,13 @@ async function createAgentService(options = {}) {
   const controlSecret = crypto.randomBytes(24).toString("base64url");
   const workers = new Map();
   const staging = new Map();
+  const runtimeInputs = new Map();
+  let mutationQueue = Promise.resolve();
+  function serializeMutation(operation) {
+    const result = mutationQueue.then(operation);
+    mutationQueue = result.catch(() => {});
+    return result;
+  }
 
   const taskStore = createEventStore({
     journalFile: path.join(dataDir, "tasks", "events.ndjson"),
@@ -264,21 +282,46 @@ async function createAgentService(options = {}) {
 
   function currentCapabilities() {
     const active = onlineWorkers().sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
+    const headless = typeof options.headlessCapabilities === "function" ? options.headlessCapabilities() : options.headlessCapabilities;
     return {
       apiVersion: "v1",
       localOnly: true,
+      instance: { pid: process.pid, root, dataDir },
+      execution: options.headless ? "headless" : "browser-worker",
+      auth: { localCli: options.headless ? "header-loopback" : "bearer", browser: "bearer-same-origin" },
       remoteAccess: { enabled: false },
-      worker: publicWorkerStatus(),
-      taskFamilies: clone(active?.capabilities?.taskFamilies || [])
+      worker: options.headless ? { online: true, type: "headless", id: "local-service", label: "Local background service" } : publicWorkerStatus(),
+      taskFamilies: clone(headless?.taskFamilies || active?.capabilities?.taskFamilies || [])
     };
   }
 
   function getTask(taskId) {
-    return taskStore.getState().tasksById[String(taskId || "")] || null;
+    return taskStore.getState(state => state.tasksById[String(taskId || "")] || null);
+  }
+
+  function cancelTaskIdsFor(workerId) {
+    return taskStore.getState(state => Object.values(state.tasksById)
+      .filter(task => task.claimedBy?.id === workerId && task.cancelRequested && !TERMINAL_TASK_STATES.has(task.state))
+      .map(task => task.taskId));
   }
 
   function requireAgent(request, response) {
     const header = String(request.headers.authorization || "");
+    if (!validOriginHeader(request)) {
+      sendJson(response, 403, { success: false, error: "untrusted_origin" });
+      return false;
+    }
+    if (header === `Bearer ${auth.token}`) return true;
+    const cli = options.headless && request.headers["x-api-plus-client"] === "cli-v1";
+    if (cli && !header) {
+      const remote = request.socket?.remoteAddress || "";
+      if (request.headers.origin || request.headers.referer || request.headers["sec-fetch-site"] || request.headers["sec-fetch-dest"] ||
+        !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) {
+        sendJson(response, 403, { success: false, error: "native_loopback_client_required" });
+        return false;
+      }
+      return true;
+    }
     if (header !== `Bearer ${auth.token}`) {
       sendJson(response, 401, { success: false, error: "unauthorized" }, { "WWW-Authenticate": "Bearer" });
       return false;
@@ -311,6 +354,10 @@ async function createAgentService(options = {}) {
   }
 
   async function appendTaskCreated(raw) {
+    return serializeMutation(() => appendTaskCreatedUnlocked(raw));
+  }
+
+  async function appendTaskCreatedUnlocked(raw) {
     const clientTaskId = cleanText(raw.clientTaskId, "", 180);
     const taskType = cleanText(raw.taskType, "", 64);
     if (!clientTaskId || !taskType) {
@@ -318,18 +365,18 @@ async function createAgentService(options = {}) {
       error.status = 400;
       throw error;
     }
-    const before = taskStore.getState();
-    const existingId = before.taskIdByClientId[clientTaskId];
-    if (existingId) return { task: before.tasksById[existingId], created: false };
+    const existing = taskStore.getState(state => state.tasksById[state.taskIdByClientId[clientTaskId]] || null);
+    if (existing) return { task: existing, created: false };
     const taskId = crypto.randomUUID();
     const createdAt = new Date(nowMs()).toISOString();
     const task = {
       taskId,
       clientTaskId,
       taskType,
-      input: normalizeTaskInput(raw.input),
+      input: safeTaskMetadata(normalizeTaskInput(raw.input)),
       origin: normalizeOrigin(raw.origin),
-      state: onlineWorkers().length ? "pending" : "waiting_for_worker",
+      state: options.headless || onlineWorkers().length ? "pending" : "waiting_for_worker",
+      executionOwner: options.headless ? "headless" : "browser",
       createdAt,
       updatedAt: createdAt,
       upstreamTaskIds: [],
@@ -340,15 +387,16 @@ async function createAgentService(options = {}) {
       leaseExpiresAt: 0,
       cancelRequested: false
     };
+    runtimeInputs.set(taskId, normalizeTaskInput(raw.input));
     await taskStore.append({ eventId: `task-created:${taskId}`, type: "task-created", task });
     return { task: getTask(taskId), created: true };
   }
 
   async function recoverExpiredLeases() {
     const now = nowMs();
-    const tasks = Object.values(taskStore.getState().tasksById);
+    const tasks = taskStore.getState(state => Object.values(state.tasksById).filter(task =>
+      task.executionOwner !== "headless" && task.claimedBy && task.leaseExpiresAt && task.leaseExpiresAt <= now && !TERMINAL_TASK_STATES.has(task.state)));
     for (const task of tasks) {
-      if (!task.claimedBy || !task.leaseExpiresAt || task.leaseExpiresAt > now || TERMINAL_TASK_STATES.has(task.state)) continue;
       const nextState = task.upstreamTaskIds?.length
         ? "polling"
         : task.state === "submitting"
@@ -393,21 +441,38 @@ async function createAgentService(options = {}) {
         return true;
       }
       const mediaType = cleanText(parts.find(part => part.name === "mediaType")?.content.toString("utf8"), "other", 16);
+      function jsonPart(name) {
+        const value = parts.find(part => part.name === name)?.content.toString("utf8");
+        if (!value) return {};
+        try { return JSON.parse(value); } catch { throw Object.assign(new Error(`Invalid ${name} JSON`), { status: 400 }); }
+      }
+      const metadata = jsonPart("metadata");
+      const origin = normalizeOrigin(jsonPart("origin"));
       const assetId = crypto.randomUUID();
       const file = path.join(dataDir, "staging", assetId);
       await fs.promises.writeFile(file, filePart.content);
+      const measured = await probeLocalMedia(file, { name: filePart.fileName, mime: filePart.mime });
       const asset = {
         assetId,
         name: path.basename(filePart.fileName),
         mime: filePart.mime,
         mediaType: ["image", "video", "audio", "other"].includes(mediaType) ? mediaType : "other",
         size: filePart.content.length,
+        sha256: crypto.createHash("sha256").update(filePart.content).digest("hex"),
+        sourcePath: cleanText(metadata.sourcePath, "", 4096),
+        lastModified: Number(metadata.lastModified || 0),
+        ...(Number(metadata.duration) > 0 ? { duration: Number(metadata.duration) } : {}),
+        ...(Number(metadata.width) > 0 ? { width: Number(metadata.width) } : {}),
+        ...(Number(metadata.height) > 0 ? { height: Number(metadata.height) } : {}),
+        ...measured,
+        origin,
         createdAt: nowMs(),
         expiresAt: nowMs() + 24 * 60 * 60 * 1000,
         workerUrl: `${CONTROL_PREFIX}/assets/${assetId}`
       };
       staging.set(assetId, { ...asset, file });
       await writeJsonAtomic(`${file}.json`, asset);
+      await appendHistoryRecords([{ ...asset, id: assetId, recordId: `staged:${assetId}`, kind: "upload", type: asset.mediaType, source: "agent", staging: true }], { taskId: "", origin }, { type: "headless", id: "local-service" });
       sendJson(response, 201, { success: true, asset });
       return true;
     }
@@ -511,19 +576,17 @@ async function createAgentService(options = {}) {
         return true;
       }
       worker.lastSeenAt = nowMs();
-      const claimed = Object.values(taskStore.getState().tasksById).filter(task => task.claimedBy?.id === worker.id && !TERMINAL_TASK_STATES.has(task.state));
-      for (const task of claimed) {
-        await taskStore.append({
-          eventId: `lease-renewed:${task.taskId}:${worker.lastSeenAt}`,
-          type: "task-lease-renewed",
-          taskId: task.taskId,
-          workerId: worker.id,
-          leaseExpiresAt: worker.lastSeenAt + leaseMs
-        });
-      }
-      const cancelTaskIds = Object.values(taskStore.getState().tasksById)
-        .filter(task => task.claimedBy?.id === worker.id && task.cancelRequested && !TERMINAL_TASK_STATES.has(task.state))
-        .map(task => task.taskId);
+      const claimedIds = taskStore.getState(state => Object.values(state.tasksById)
+        .filter(task => task.claimedBy?.id === worker.id && !TERMINAL_TASK_STATES.has(task.state))
+        .map(task => task.taskId));
+      await taskStore.appendMany(claimedIds.map(taskId => ({
+        eventId: `lease-renewed:${taskId}:${worker.lastSeenAt}`,
+        type: "task-lease-renewed",
+        taskId,
+        workerId: worker.id,
+        leaseExpiresAt: worker.lastSeenAt + leaseMs
+      })));
+      const cancelTaskIds = cancelTaskIdsFor(worker.id);
       sendJson(response, 200, { success: true, leaseMs, cancelTaskIds });
       return true;
     }
@@ -536,11 +599,15 @@ async function createAgentService(options = {}) {
       }
       worker.lastSeenAt = nowMs();
       await recoverExpiredLeases();
-      const task = taskStore.getState().taskOrder
-        .map(taskId => getTask(taskId))
-        .find(item => item && ["pending", "waiting_for_worker", "polling"].includes(item.state) && !item.claimedBy && !item.cancelRequested);
+      const task = taskStore.getState(state => {
+        const taskId = state.taskOrder.find(id => {
+          const item = state.tasksById[id];
+          return item && item.executionOwner !== "headless" && ["pending", "waiting_for_worker", "polling"].includes(item.state) && !item.claimedBy && !item.cancelRequested;
+        });
+        return state.tasksById[taskId] || null;
+      });
       if (!task) {
-        sendJson(response, 200, { success: true, task: null });
+        sendJson(response, 200, { success: true, task: null, cancelTaskIds: cancelTaskIdsFor(worker.id) });
         return true;
       }
       await taskStore.append({
@@ -550,7 +617,7 @@ async function createAgentService(options = {}) {
         worker: { type: "browser", id: worker.id, label: worker.label },
         leaseExpiresAt: nowMs() + leaseMs
       });
-      sendJson(response, 200, { success: true, task: getTask(task.taskId), leaseMs });
+      sendJson(response, 200, { success: true, task: getTask(task.taskId), leaseMs, cancelTaskIds: cancelTaskIdsFor(worker.id) });
       return true;
     }
     if (request.method === "POST" && pathname === `${CONTROL_PREFIX}/worker/report`) {
@@ -666,7 +733,8 @@ async function createAgentService(options = {}) {
         success: true,
         token: auth.token,
         rotatable: auth.rotatable,
-        worker: publicWorkerStatus(),
+        worker: options.headless ? currentCapabilities().worker : publicWorkerStatus(),
+        headless: { enabled: Boolean(options.headless) },
         queue: Object.values(taskStore.getState().tasksById).reduce((counts, task) => {
           counts[task.state] = (counts[task.state] || 0) + 1;
           return counts;
@@ -698,11 +766,57 @@ async function createAgentService(options = {}) {
     }
   }
 
+  async function getStagedAsset(assetId) {
+    if (!/^[a-zA-Z0-9-]{1,180}$/.test(String(assetId || ""))) throw Object.assign(new Error("Invalid asset ID"), { status: 400 });
+    const file = path.join(dataDir, "staging", assetId);
+    const asset = staging.get(assetId) || { ...JSON.parse(await fs.promises.readFile(`${file}.json`, "utf8")), file };
+    staging.set(assetId, asset);
+    return clone(asset);
+  }
+
+  async function updateStagedAsset(assetId, patch) {
+    const asset = { ...await getStagedAsset(assetId), ...clone(patch) };
+    staging.set(assetId, asset);
+    const { file, ...metadata } = asset;
+    await writeJsonAtomic(`${file}.json`, metadata);
+    return asset;
+  }
+
+  async function claimHeadless(excludedIds = []) {
+    return serializeMutation(async () => {
+      const excluded = new Set(excludedIds);
+      const task = taskStore.getState(state => state.taskOrder.map(id => state.tasksById[id]).find(item =>
+        item.executionOwner === "headless" && !excluded.has(item.taskId) && !TERMINAL_TASK_STATES.has(item.state)) || null);
+      if (!task) return null;
+      await taskStore.append({ eventId: `headless-claim:${task.taskId}:${crypto.randomUUID()}`, type: "task-claimed", taskId: task.taskId,
+        worker: { type: "headless", id: "local-service", label: "Local background service" }, leaseExpiresAt: 0 });
+      return getTask(task.taskId);
+    });
+  }
+
+  async function updateExecution(taskId, execution) {
+    await taskStore.append({ eventId: `execution:${taskId}:${crypto.randomUUID()}`, type: "task-execution-updated", taskId, execution });
+    return getTask(taskId);
+  }
+
+  async function reportHeadless(taskId, report) {
+    await taskStore.append({ eventId: `headless-report:${taskId}:${crypto.randomUUID()}`, type: "task-reported", taskId, ...clone(report) });
+    return getTask(taskId);
+  }
+
   return {
     route,
     dataDir,
     getAgentToken: () => auth.token,
     getTask,
+    getRuntimeInput: taskId => clone(runtimeInputs.get(taskId) || getTask(taskId)?.input || {}),
+    createTask: appendTaskCreated,
+    claimHeadless,
+    updateExecution,
+    reportHeadless,
+    getStagedAsset,
+    updateStagedAsset,
+    appendHistoryRecords,
     getCapabilities: currentCapabilities,
     getHistory: () => listHistoryRecords(historyStore.getState()),
     taskStore,
@@ -719,4 +833,3 @@ module.exports = {
   applyTaskEvent,
   TASK_STATES
 };
-

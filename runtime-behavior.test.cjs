@@ -4,6 +4,19 @@ const path = require("node:path");
 
 const source = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
+const taskPageCatalog = source.slice(source.indexOf("const TASK_PAGES ="), source.indexOf("const state ="));
+const taskPages = Function(`${taskPageCatalog}; return TASK_PAGES;`)();
+const navExpression = source.match(/\$\{(TASK_PAGES\.filter\([^\n]+?)\.map\(page => navButton\(page\)\)/)[1];
+const navigationPages = Function("TASK_PAGES", `return ${navExpression};`)(taskPages);
+for (const id of ["subjectLibrary", "avatar", "viduVoice", "viduRef", "music", "videoEdit"]) {
+  assert.ok(!navigationPages.some(page => page.id === id), `${id} must not appear in task-type navigation`);
+  assert.ok(taskPages.some(page => page.id === id), `${id} legacy page metadata must remain available for history`);
+}
+for (const id of ["avatarWorkflow", "image", "imageVideo", "motion", "multiVideo"]) {
+  assert.ok(navigationPages.some(page => page.id === id), `${id} must remain in task-type navigation`);
+}
+assert.ok(taskPages.some(page => page.id === "history" && page.ready), "history must remain available");
+
 function handlerBody(selector) {
   const marker = `tr.querySelector(".${selector}").addEventListener("click", () => {`;
   const start = source.indexOf(marker);
@@ -40,6 +53,29 @@ function functionBody(name) {
 ].forEach(selector => {
   assert.doesNotMatch(handlerBody(selector), /is[A-Za-z]+RowLocked\(row\)/, `${selector} must work while the source row is running`);
 });
+
+const prependRows = Function("targetRows", "newRows", functionBody("prependRows"));
+const orderedRows = [{ id: "old-1" }, { id: "old-2" }];
+prependRows(orderedRows, [{ id: "new-1" }, { id: "new-2" }]);
+assert.deepEqual(
+  orderedRows.map(row => row.id),
+  ["new-1", "new-2", "old-1", "old-2"],
+  "new rows must be prepended without reversing their input order"
+);
+
+const singleRowPrependCalls = source.match(/prependRows\((?:state\.(?:rows|multiRows|viduRefRows|imageVideoRows|motionRows|avatarRows)|pipeline\.rows\(\)), \[row\]\);/g) || [];
+assert.equal(singleRowPrependCalls.length, 13, "all manual, history-reuse, and Agent single-row creation paths must prepend rows");
+assert.doesNotMatch(
+  source,
+  /state\.(?:rows|multiRows|viduRefRows|imageVideoRows|motionRows|avatarRows)\.push\(row\)|pipeline\.rows\(\)\.push\(row\)/,
+  "new row creation paths must not append rows"
+);
+assert.match(
+  source,
+  /const rows = prompts\.map\(prompt => createRow\([\s\S]*?prependRows\(state\.rows, rows\);/,
+  "batch prompts must be created in input order and prepended as one block"
+);
+assert.doesNotMatch(source, /prompts\.forEach\(prompt => state\.rows\.push/, "batch prompts must not append rows");
 
 assert.match(
   source,

@@ -4,7 +4,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { spawn, execFile } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 export const DEFAULT_BASE_URL = "http://127.0.0.1:4198/api/agent/v1";
 const TERMINAL_STATES = new Set(["completed", "failed", "canceled", "submission-unknown"]);
@@ -77,7 +79,100 @@ function parseArgs(args) {
 }
 
 function helpText() {
-  return `API Plus Agent client\n\nUsage:\n  api-plus-agent-client.mjs capabilities\n  api-plus-agent-client.mjs upload <file> [--media-type image|video|audio|other]\n  api-plus-agent-client.mjs submit --task-type <type> --input <json|@file|-> [--client-task-id <id>]\n  api-plus-agent-client.mjs status <task-id>\n  api-plus-agent-client.mjs wait <task-id> [--interval <ms>] [--timeout <ms>]\n  api-plus-agent-client.mjs cancel <task-id>\n\nEnvironment:\n  API_PLUS_AGENT_TOKEN          Required bearer token\n  API_PLUS_AGENT_BASE_URL       Default: ${DEFAULT_BASE_URL}\n  API_PLUS_AGENT_SOURCE_CLIENT  Agent family, for example codex or minimax-code\n  API_PLUS_AGENT_SOURCE_ID      Stable caller identifier\n  API_PLUS_AGENT_SOURCE_LABEL   Human-readable source shown in history\n`;
+  return `API Plus Agent client (no browser or local token setup required)
+
+Usage:
+  api-plus-agent-client.mjs start
+  api-plus-agent-client.mjs capabilities
+  api-plus-agent-client.mjs upload <file> [--media-type image|video|audio|other] [--duration seconds --width pixels --height pixels]
+  api-plus-agent-client.mjs submit --task-type <type> --input <json|@file|-> [--client-task-id <id>]
+  api-plus-agent-client.mjs status <task-id>
+  api-plus-agent-client.mjs wait <task-id> [--interval ms --timeout ms]
+  api-plus-agent-client.mjs cancel <task-id>
+  api-plus-agent-client.mjs history [--task-id <id>]
+  api-plus-agent-client.mjs events <task-id> [--after sequence]
+  api-plus-agent-client.mjs recreate <task-id> [--client-task-id <new-id>]
+
+Environment (optional):
+  API_PLUS_AGENT_TOKEN          Existing bearer token for compatibility
+  API_PLUS_AGENT_BASE_URL       Default: ${DEFAULT_BASE_URL}
+  API_PLUS_WORKBENCH_ROOT       Installed workbench root; normally auto-discovered
+  API_PLUS_AGENT_AUTOSTART      Set 0 to disable automatic hidden service startup
+  API_PLUS_AGENT_SOURCE_CLIENT  Agent family, for example codex or minimax-code
+  API_PLUS_AGENT_SOURCE_ID      Stable caller identifier
+  API_PLUS_AGENT_SOURCE_LABEL   Human-readable source shown in history
+`;
+}
+
+export function resolveWorkbench(env = process.env) {
+  const root = path.resolve(cleanText(env.API_PLUS_WORKBENCH_ROOT, path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..')));
+  const server = path.join(root, 'server.cjs');
+  if (!fs.existsSync(server)) throw new ClientError('Workbench server.cjs was not found; install the full workbench or set API_PLUS_WORKBENCH_ROOT', { code: 'workbench_not_found', root });
+  const dataDir = path.resolve(env.API_BATCH_DATA_DIR || env.API_BATCH_LAUNCHER_DATA_DIR || (fs.existsSync(path.join(root, '.git')) ? path.join(path.dirname(root), 'APIplusWebtools-data') : path.join(root, 'data')));
+  return { root, server, dataDir, node: fs.existsSync(path.join(root, 'runtime/node.exe')) ? path.join(root, 'runtime/node.exe') : process.execPath };
+}
+
+export async function ensureLocalService(env = process.env) {
+  const base = normalizeBaseUrl(env.API_PLUS_AGENT_BASE_URL);
+  const expected = env.API_PLUS_WORKBENCH_ROOT || env.API_BATCH_DATA_DIR || env.API_BATCH_LAUNCHER_DATA_DIR ? resolveWorkbench(env) : null;
+  const samePath = (a, b) => path.resolve(String(a || '')).toLowerCase() === path.resolve(String(b || '')).toLowerCase();
+  const check = async () => {
+    const headers = { 'X-API-Plus-Client': 'cli-v1', ...(env.API_PLUS_AGENT_TOKEN ? { Authorization: `Bearer ${env.API_PLUS_AGENT_TOKEN}` } : {}) };
+    const response = await fetch(`${base}/capabilities`, { headers, signal: AbortSignal.timeout(1500) });
+    if (!response.ok) throw new ClientError(`Existing local service returned HTTP ${response.status}; restart the updated workbench service`, { code: 'existing_service_rejected', status: response.status });
+    const capabilities = await response.json();
+    if (expected && (!capabilities.instance || !samePath(capabilities.instance.root, expected.root) || !samePath(capabilities.instance.dataDir, expected.dataDir))) {
+      throw new ClientError('Local port belongs to a different installation or data directory; stop that service or choose another local port', { code: 'installation_mismatch', expected: { root: expected.root, dataDir: expected.dataDir }, actual: capabilities.instance || null });
+    }
+    return capabilities;
+  };
+  try { return await check(); } catch (error) { if (error instanceof ClientError) throw error; }
+  if (String(env.API_PLUS_AGENT_AUTOSTART) === '0') throw new ClientError('Local workbench is not running and auto-start is disabled', { code: 'connection_failed' });
+  const install = resolveWorkbench(env);
+  const logDir = path.join(install.dataDir, 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const url = new URL(base);
+  const launchEnv = { ...env, PORT: url.port || '80', HOST: '127.0.0.1', API_BATCH_DATA_DIR: install.dataDir };
+  let child;
+  if (process.platform === 'win32') {
+    // PowerShell's native-command pipeline can otherwise leave inherited output
+    // pipe handles in a detached grandchild even when Node redirects its stdio.
+    // Start-Process creates the hidden server with independently owned handles.
+    child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      '$ErrorActionPreference = "Stop"; Start-Process -FilePath $env:API_PLUS_LAUNCH_NODE -ArgumentList (\'"\' + $env:API_PLUS_LAUNCH_SERVER + \'"\') -WorkingDirectory $env:API_PLUS_LAUNCH_ROOT -WindowStyle Hidden'], {
+      windowsHide: true, stdio: 'ignore', env: { ...launchEnv, API_PLUS_LAUNCH_NODE: install.node, API_PLUS_LAUNCH_SERVER: install.server,
+        API_PLUS_LAUNCH_ROOT: install.root, API_PLUS_HEADLESS_LOGS: '1' }
+    });
+  } else {
+    const stdout = fs.openSync(path.join(logDir, 'headless.out.log'), 'a');
+    const stderr = fs.openSync(path.join(logDir, 'headless.err.log'), 'a');
+    child = spawn(install.node, [install.server], { cwd: install.root, detached: true, env: launchEnv, stdio: ['ignore', stdout, stderr] });
+    fs.closeSync(stdout); fs.closeSync(stderr);
+  }
+  let launchError;
+  child.on('error', error => { launchError = error; });
+  child.unref();
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (launchError) throw new ClientError(`Could not start workbench: ${launchError.message}`, { code: 'startup_failed' });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    try { return await check(); } catch (error) { if (error instanceof ClientError) throw error; }
+  }
+  throw new ClientError('Workbench startup timed out; inspect the headless logs', { code: 'startup_timeout', logDir });
+}
+
+async function mediaMetadata(file, env) {
+  const stat = fs.statSync(file);
+  const base = { sourcePath: file, lastModified: stat.mtimeMs };
+  if (!['image', 'audio', 'video'].includes(inferMediaType(file))) return base;
+  const candidates = [env.API_PLUS_FFPROBE, path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../runtime/ffprobe.exe'), 'ffprobe'].filter(Boolean);
+  for (const command of candidates) {
+    try {
+      const { stdout } = await promisify(execFile)(command, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height,duration', '-of', 'json', file], { windowsHide: true, timeout: 15000, maxBuffer: 2 * 1024 * 1024 });
+      const value = JSON.parse(stdout); const video = value.streams?.find(stream => stream.codec_type === 'video');
+      return { ...base, ...(Number(value.format?.duration) > 0 ? { duration: Number(value.format.duration) } : {}), ...(video?.width ? { width: video.width, height: video.height } : {}), metadataSource: 'ffprobe' };
+    } catch {}
+  }
+  return { ...base, metadataSource: 'unavailable' };
 }
 
 function normalizeBaseUrl(value) {
@@ -130,11 +225,17 @@ function safeMessage(value, token) {
   return token ? text.split(token).join("[redacted]") : text;
 }
 
+function safeResponse(value, token) {
+  if (typeof value === 'string') return token ? value.split(token).join('[redacted]') : value;
+  if (Array.isArray(value)) return value.map(item => safeResponse(item, token));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, safeResponse(child, token)]));
+}
+
 async function requestJson(endpoint, { env = process.env, method = "GET", body, form } = {}) {
   const token = cleanText(env.API_PLUS_AGENT_TOKEN);
-  if (!token) throw new ClientError("API_PLUS_AGENT_TOKEN is required", { code: "token_required" });
   const baseUrl = normalizeBaseUrl(env.API_PLUS_AGENT_BASE_URL);
-  const headers = { Accept: "application/json", Authorization: `Bearer ${token}` };
+  const headers = { Accept: "application/json", "X-API-Plus-Client": "cli-v1", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   const init = { method, headers };
   if (form) init.body = form;
   else if (body !== undefined) {
@@ -159,7 +260,7 @@ async function requestJson(endpoint, { env = process.env, method = "GET", body, 
     throw new ClientError(safeMessage(payload.message || payload.error || `HTTP ${response.status}`, token), {
       code: payload.error || "http_error",
       status: response.status,
-      response: payload
+      response: safeResponse(payload, token)
     });
   }
   return payload;
@@ -173,6 +274,49 @@ function requirePositional(positional, index, label) {
 
 async function runCommand(command, args, env) {
   const { options, positional } = parseArgs(args);
+  if (command === 'start') return ensureLocalService(env);
+  if (command === 'history') return requestJson(`/history${options['task-id'] ? `?taskId=${encodeURIComponent(options['task-id'])}` : ''}`, { env });
+  if (command === 'events') return requestJson(`/tasks/${encodeURIComponent(requirePositional(positional, 0, 'task-id'))}/events${options.after ? `?after=${encodeURIComponent(options.after)}` : ''}`, { env });
+  if (command === 'recreate') {
+    const id = requirePositional(positional, 0, 'task-id');
+    const { task } = await requestJson(`/tasks/${encodeURIComponent(id)}`, { env });
+    const input = task.execution?.resolvedInput || task.input;
+    const origin = originFromEnvironment(env);
+    return requestJson('/tasks', { env, method: 'POST', body: { clientTaskId: cleanText(options['client-task-id'], `reroll-${id}-${crypto.randomUUID()}`), taskType: task.taskType, input: { ...input, parentTaskId: id }, origin } });
+  }
+  if (command === "avatar-library") return requestJson("/avatar-workflow/library", { env });
+  if (command === "avatar-submit") {
+    const input = readJsonInput(options.input);
+    const origin = originFromEnvironment(env);
+    const clientTaskId = cleanText(options["client-task-id"], stableClientTaskId({ taskType: "avatar-workflow", input, origin }));
+    return requestJson("/avatar-workflow/jobs", { env, method: "POST", body: { clientTaskId, input, origin } });
+  }
+  if (command === "avatar-status" || command === "avatar-wait") {
+    const id = requirePositional(positional, 0, "job-id");
+    const interval = Math.max(500, Number(options.interval || 3000));
+    const timeout = Math.max(interval, Number(options.timeout || 60 * 60 * 1000));
+    if (!Number.isFinite(interval) || !Number.isFinite(timeout)) throw new ClientError("Invalid wait interval or timeout");
+    const started = Date.now();
+    do {
+      const result = await requestJson(`/avatar-workflow/jobs/${encodeURIComponent(id)}`, { env });
+      if (command === "avatar-status" || TERMINAL_STATES.has(result.job?.state) || result.job?.state === "partial") return result;
+      await new Promise(resolve => setTimeout(resolve, interval));
+    } while (Date.now() - started < timeout);
+    throw new ClientError("Timed out; keep the existing job ID and query it again");
+  }
+  if (command === "avatar-add-voice" || command === "avatar-add-workflow") {
+    const collection = command === "avatar-add-voice" ? "voices" : "workflows";
+    return requestJson(`/avatar-workflow/library/${collection}`, { env, method: "POST", body: { item: readJsonInput(options.input) } });
+  }
+  if (command === "avatar-upload") {
+    const file = path.resolve(requirePositional(positional, 0, "file"));
+    const mediaType = inferMediaType(file);
+    if (!["image", "audio", "video"].includes(mediaType)) throw new ClientError("Avatar upload accepts an image, audio or subtitle-source video file");
+    const form = new FormData();
+    form.append("origin", JSON.stringify(originFromEnvironment(env)));
+    form.append("file", new Blob([fs.readFileSync(file)], { type: inferMime(file, mediaType) }), path.basename(file));
+    return requestJson(`/avatar-workflow/${mediaType === "image" ? "images" : mediaType === "video" ? "media" : "audio"}`, { env, method: "POST", form });
+  }
   if (command === "capabilities") return requestJson("/capabilities", { env });
 
   if (command === "upload") {
@@ -187,6 +331,10 @@ async function runCommand(command, args, env) {
     const buffer = fs.readFileSync(file);
     const form = new FormData();
     form.append("mediaType", mediaType);
+    form.append("origin", JSON.stringify(originFromEnvironment(env)));
+    const metadata = await mediaMetadata(file, env);
+    for (const key of ['duration', 'width', 'height']) if (options[key] !== undefined) metadata[key] = Number(options[key]);
+    form.append("metadata", JSON.stringify(metadata));
     form.append("file", new Blob([buffer], { type: inferMime(file, mediaType) }), path.basename(file));
     return requestJson("/assets", { env, method: "POST", form });
   }
@@ -247,9 +395,11 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const command = argv[0];
   if (!command || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(helpText());
+    process.stdout.write("\nShared digital-human workflow (server-executed):\n  avatar-library\n  avatar-upload <image-audio-or-video-file>\n  avatar-add-voice --input <json|@file>\n  avatar-add-workflow --input <json|@file>\n  avatar-submit --input <json|@file> [--client-task-id <id>]\n  avatar-status <job-id>\n  avatar-wait <job-id> [--interval <ms>] [--timeout <ms>]\n");
     return 0;
   }
   try {
+    if (String(env.API_PLUS_AGENT_AUTOSTART) !== '0' || env.API_PLUS_WORKBENCH_ROOT || env.API_BATCH_DATA_DIR || env.API_BATCH_LAUNCHER_DATA_DIR) await ensureLocalService(env);
     const result = await runCommand(command, argv.slice(1), env);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;

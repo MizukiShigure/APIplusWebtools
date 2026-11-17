@@ -55,5 +55,44 @@ test("server exposes authenticated Agent routes using the configured external da
   });
   assert.equal(response.status, 200, stderr);
   assert.equal((await response.json()).localOnly, true);
-});
 
+  const sessionResponse = await fetch(`http://127.0.0.1:${port}/api/control/v1/session`);
+  assert.equal(sessionResponse.status, 200, stderr);
+  const controlCookie = String(sessionResponse.headers.get("set-cookie") || "").split(";", 1)[0];
+  const createdAt = Date.now();
+  const appendResponse = await fetch(`http://127.0.0.1:${port}/api/control/v1/history/records`, {
+    method: "POST",
+    headers: {
+      Cookie: controlCookie,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      records: [{
+        recordId: "generation-after-storage-migration",
+        kind: "generation",
+        mediaType: "video",
+        createdAt,
+        prompt: "recovery check",
+        results: ["https://cdn.example/recovered.mp4"]
+      }]
+    })
+  });
+  assert.equal(appendResponse.status, 200, stderr);
+  await fs.promises.writeFile(path.join(dataDir, "history.json"), JSON.stringify({
+    uploadHistory: [{ id: "legacy-upload", url: "https://cdn.example/old.png", createdAt: createdAt - 1 }],
+    generationHistory: [{ id: "legacy-generation", results: ["https://cdn.example/old.mp4"], createdAt: createdAt - 1 }]
+  }));
+
+  const anonymousHistory = await fetch(`http://127.0.0.1:${port}/api/local/history`);
+  assert.equal(anonymousHistory.status, 401);
+  const anonymousWrite = await fetch(`http://127.0.0.1:${port}/api/local/history`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  assert.equal(anonymousWrite.status, 401);
+  const localHistoryResponse = await fetch(`http://127.0.0.1:${port}/api/local/history`, { headers: { Cookie: controlCookie } });
+  assert.equal(localHistoryResponse.status, 200, stderr);
+  const localHistory = await localHistoryResponse.json();
+  const recoveredRecord = localHistory.generationHistory.find(record => record.id === "generation-after-storage-migration");
+  assert.ok(recoveredRecord,
+    "local history recovery must include records stored only in the event journal");
+  assert.ok(localHistory.generationHistory.some(record => record.id === "legacy-generation"));
+  assert.ok(localHistory.uploadHistory.some(record => record.id === "legacy-upload"));
+});

@@ -132,7 +132,8 @@ It should finish by reporting changed files, test results, package path when bui
 
 The automation path consists of:
 
-- `agent-service.cjs`: authenticated localhost routes, staging, task/history journals, recovery.
+- `agent-service.cjs`: loopback routes, CLI admission, staging, task/history journals, recovery.
+- `agent-headless.cjs` and `workbench-model-catalog.cjs`: server-side uploads, submission/polling, shared model rules and history.
 - `agent-runtime.js`: browser worker heartbeat, claim, report and cancellation protocol.
 - `agent-task-adapter.js`: task-family aliases, capability manifest and row mapping.
 - `skills/api-plus-agent`: portable Skill, reference, and dependency-free Node client.
@@ -148,6 +149,8 @@ node agent-ui-contract.test.cjs
 node agent-skill-package.test.cjs
 ```
 
-For Codex, copy/link `skills/api-plus-agent` into the configured Codex skills directory or keep it discoverable through this repository. For Minimax Code, register the same folder with its local skill/instruction discovery and invoke the bundled `api-plus-agent-client.mjs`. Both clients need `API_PLUS_AGENT_TOKEN` in their process environment.
+For Codex or Minimax Code, register the chosen skill through its supported discovery directory. The full `api-plus-agent` release contains a clean workbench/runtime ZIP; the separate `local-api-workbench` invokes the fixed local installation. Both use the same installed CLI without browser or token setup. Run `scripts/run-workbench.ps1 capabilities` from the portable skill, or `scripts/workbench.ps1 capabilities` from the local skill. Preserve a recognizable source identity per Agent/task.
 
-Never add direct provider credentials or company-gateway calls to the Skill. Extend the browser's model catalogs and adapters, then let `/capabilities` publish the change. Preserve append-only Agent permissions and localhost binding. A future private remote transport must add explicit authentication, TLS/tunnel boundaries, replay protection and operator opt-in rather than changing the default listener.
+Never add direct provider credentials or company-gateway calls to a Skill. Extend shared model contracts and adapters, then let `/capabilities` publish the change. Preserve append-only Agent permissions, history inputs, and localhost binding. A future remote transport requires explicit authentication, TLS/tunnel boundaries, replay protection, and operator opt-in.
+
+Package changes must test real extraction, the bundled runtime, tokenless CLI startup without a browser, and privacy exclusions. Run `node skill-release.test.cjs` with `PORTABLE_TEST_NODE` / `PORTABLE_TEST_LICENSE` for a full archive test. Live upstream connectivity and media quality are separate evidence from mock integration tests.
