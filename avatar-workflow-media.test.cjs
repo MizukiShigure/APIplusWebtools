@@ -17,7 +17,9 @@ const prefix = "/api/control/v1/avatar-workflow/media/";
 const key = "example-rh-key";
 
 async function setup(t, responses = [], env = {}) {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "avatar-media-test-"));
+  // Hosted Windows runners can return an 8.3 alias for TEMP. Production resolves
+  // the private media directory, so assertions must use the same canonical root.
+  const dataDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "avatar-media-test-")));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const calls = [];
   const fakeFetch = async (url, init) => {
