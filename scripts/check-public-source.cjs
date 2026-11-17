@@ -11,9 +11,12 @@ const allowed=new Set([...block.matchAll(/^\s*"([^"]+)"/gm)].map(match=>match[1]
 for(const name of ['.gitattributes','.github/workflows/ci.yml','.github/PULL_REQUEST_TEMPLATE.md'])allowed.add(name);
 const files=git('ls-files','-z').split('\0').filter(Boolean);
 const issues=[];
+const privateHosts=(process.env.API_PLUS_PRIVATE_HOSTS || '').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean);
 for(const file of files) {
   if(!allowed.has(file)){issues.push(`${file}: outside public source allowlist`);continue;}
   const text=staged?git('show',`:${file}`):fs.readFileSync(path.join(root,file),'utf8');
+  if(file==='app.js' && !text.includes('const API_DEFAULT = "";'))issues.push(`${file}: API Base must be empty in public source`);
+  if(privateHosts.some(host=>text.toLowerCase().includes(host) || text.toLowerCase().includes(host.replaceAll('.','\\.'))))issues.push(`${file}: private gateway address`);
   const patterns=[
     ['private key',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
     ['access token',/\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-[A-Za-z0-9_-]{32,})\b/],

@@ -2,7 +2,7 @@
 
 本项目提供本地浏览器批量生成界面和后台 Agent CLI。普通用户可以双击启动页面，Agent 可不开浏览器直接上传、生成、查历史和重新抽卡；两种方式使用同一套模型和历史记录。
 
-当前版本：`v2026.11.18-git-agent-sync.1`
+当前版本：`v2026.11.18-private-gateway.1`
 
 ## 拉取后交给 Agent 自动配置
 
@@ -15,6 +15,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Setup_Workbench.ps1
 也可以让 Agent 阅读本项目后说“配置工作台和 Skill”。安装器会检查 Node、启动本地工作台、注册随源码更新的 `api-plus-agent` Skill，并输出网页地址。之后对 Agent 说“同步项目”，即可更新代码与 Skill，保留本机配置、历史和素材；也可双击 `Update_From_Git.bat`。别人修改后通过 PR 提交，由维护者选择合入。完整流程和其他系统入口见 [安装、同步与贡献](docs/GIT_WORKFLOW.md)。
 
 网页可人工操作，也能查看经工作台提交的 Agent 任务、来源、素材、Prompt、参数及结果。各电脑的历史保存在本机，GitHub 只分发代码和 Skill。
+
+首次配置请按 [模型来源与渠道指引](docs/CHANNEL_CONFIGURATION.md) 选择公司兼容网关、RunningHub 或 Suno 等渠道。真实网关地址与凭据由使用者自己在本机填写，公开源码不内置公司地址。
 
 ## 直接使用
 
@@ -29,7 +31,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Setup_Workbench.ps1
 1. 解压整个文件夹。
 2. 双击 `Start_API_Tool.bat`。
 3. 浏览器会打开 `http://127.0.0.1:4198/`。
-4. 默认使用公司 API Base；按需填写自己的 RunningHub 密钥和工作流配置。
+4. 首次在左侧 API Base 填写管理员私下提供的网关地址，离开输入框后自动保存。本机网页与 Agent 共用，重启和同步项目后继续保留。按需填写自己的 RunningHub 密钥和工作流配置。
 5. 用完后双击 `Stop_API_Tool.bat`。
 
 带 `runtime/node.exe` 的便携版优先使用自带 Node.js，以隐藏后台进程运行，日志位于数据目录的 `logs`。不依赖全局 PM2；源码安装保留原来的 PM2 检测方式。需要主动使用 PM2 时设置 `API_BATCH_USE_PM2=1`，停止时也沿用该设置。
@@ -123,7 +125,7 @@ npm run package
 默认输出：
 
 ```text
-dist\Internal_API_Batch_Portable_v2026.11.18-git-agent-sync.1.zip
+dist\Internal_API_Batch_Portable_v2026.11.18-private-gateway.1.zip
 ```
 
 这个 ZIP 同时包含：
@@ -131,7 +133,7 @@ dist\Internal_API_Batch_Portable_v2026.11.18-git-agent-sync.1.zip
 - 普通用户直接启动所需的页面、服务和批处理；
 - 开发者/Agent 所需的源码、测试、`AGENTS.md`、工程文档与 `api-plus-agent` Skill。
 
-构建器采用明确白名单，并保留已批准的公司 API Base 与内置 RunningHub 节点模板。默认生成源码包，`data` 与 `runtime` 只有 `.keep`；生成包含运行环境的完整包需显式传入 Node 和许可证：
+构建器采用明确白名单，API Base 留空，只保留内置 RunningHub 节点模板。公开源码和新分发包不附带实际网关地址，使用者向管理员获取后在本机填写。默认生成源码包，`data` 与 `runtime` 只有 `.keep`；生成包含运行环境的完整包需显式传入 Node 和许可证：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -NodeRuntimePath runtime/node.exe -NodeLicensePath runtime/LICENSE -OutputPath dist/Workbench-Windows-x64.zip
@@ -205,7 +207,7 @@ http://127.0.0.1:4198/api/agent/v1
 使用步骤：
 
 1. 通过 [api-plus-agent Skill](skills/api-plus-agent/SKILL.md) 的 `scripts/run-workbench.ps1` 调用命令；服务未运行时自动隐藏启动，不需要打开浏览器。
-2. 本机 CLI 不需要配置 Agent 令牌或本机 API。默认使用已配置的公司网关；可选的个人第三方集成仍沿用本机保存的配置。
+2. 本机 CLI 不需要配置 Agent 令牌。首次由 Agent 指引用户在本地网页填写 API Base，后续自动读取本机配置；可选的个人第三方集成仍沿用本机保存的配置。
 3. Codex/Minimax Code 使用 [api-plus-agent Skill](skills/api-plus-agent/SKILL.md)，先调用 `capabilities`，再上传素材、提交并等待任务。
 4. 为不同调用方设置 `API_PLUS_AGENT_SOURCE_CLIENT`、`API_PLUS_AGENT_SOURCE_ID`、`API_PLUS_AGENT_SOURCE_LABEL`，历史页可按来源筛选。
 

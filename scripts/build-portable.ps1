@@ -59,6 +59,8 @@ if ([string]::IsNullOrWhiteSpace($outputDirectory)) {
 }
 
 $publicFiles = @(
+  "gateway-config.cjs",
+  "gateway-config.test.cjs",
   "Setup_Workbench.ps1",
   "Setup_Workbench.bat",
   "scripts/workbench-manage.cjs",
@@ -66,6 +68,7 @@ $publicFiles = @(
   "workbench-manage.test.cjs",
   "workbench-sync-integration.test.cjs",
   "docs/GIT_WORKFLOW.md",
+  "docs/CHANNEL_CONFIGURATION.md",
   ".gitignore",
   "AGENTS.md",
   "CHANGELOG.md",

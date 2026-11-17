@@ -5,6 +5,8 @@ const path = require("path");
 
 const root = __dirname;
 const expectedFiles = [
+  "gateway-config.cjs",
+  "gateway-config.test.cjs",
   "Setup_Workbench.ps1",
   "Setup_Workbench.bat",
   "scripts/workbench-manage.cjs",
@@ -12,6 +14,7 @@ const expectedFiles = [
   "workbench-manage.test.cjs",
   "workbench-sync-integration.test.cjs",
   "docs/GIT_WORKFLOW.md",
+  "docs/CHANNEL_CONFIGURATION.md",
   ".gitignore",
   "AGENTS.md",
   "CHANGELOG.md",
@@ -215,7 +218,7 @@ const rebuiltExpandedPath = path.join(tempRoot, "rebuilt-expanded");
 const invalidOutputPath = path.join(tempRoot, "do-not-overwrite.txt");
 
 try {
-  assert(version === "v2026.11.18-git-agent-sync.1", "VERSION must contain the release identifier");
+  assert(version === "v2026.11.18-private-gateway.1", "VERSION must contain the release identifier");
   assert(changelog.includes(version), "changelog must include the release identifier");
   assert(packageJson.scripts.start === "node server.cjs", "package start script must launch server.cjs");
   assert(packageJson.scripts.test.includes("portable-package.test.cjs"), "package test script must verify the distributable");
@@ -269,7 +272,7 @@ try {
     assert(!pattern.test(packageText), `portable package leaked ${name}`);
   }
   assertNoLiteralCredentials(packageText);
-  assert(packagedApp.includes('const API_DEFAULT = "https://gateway.example/api";'), "portable app must retain the approved company API Base");
+  assert(packagedApp.includes('const API_DEFAULT = "";'), "portable app must require a recipient-supplied API Base");
   for (const concreteValue of [
     "1975951975" + "441412098",
     "25c98e4ce709d417" + "93c66fef5a68744f",
@@ -297,7 +300,7 @@ try {
   const rebuiltFiles = collectFiles(rebuiltExpandedPath).sort();
   assert(JSON.stringify(rebuiltFiles) === JSON.stringify(expectedFiles), `unexpected second-generation portable contents: ${rebuiltFiles.join(", ")}`);
   const rebuiltApp = fs.readFileSync(path.join(rebuiltExpandedPath, "app.js"), "utf8");
-  assert(rebuiltApp.includes('const API_DEFAULT = "https://gateway.example/api";'), "second-generation portable app must retain the approved company API Base");
+  assert(rebuiltApp.includes('const API_DEFAULT = "";'), "rebuilt portable app must not embed an API Base");
 
   assert(/if not exist "\.git"/i.test(restoreScript), "Restore_Version.bat must guard ZIP installs without .git");
   assert(/Git clone is required/i.test(restoreScript), "Restore_Version.bat must explain that a Git clone is required in a ZIP install");

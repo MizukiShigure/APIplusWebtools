@@ -21,7 +21,7 @@ test('fresh clone installs a linked skill, updates from Git and preserves privat
   git(temporary,'clone',upstream,clone);
   const socket=net.createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
   const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
-  const env={...process.env,API_BATCH_DATA_DIR:'',API_PLUS_WORKBENCH_ROOT:'',API_PLUS_AGENT_BASE_URL:'',API_PLUS_AGENT_TOKEN:'',APPDATA:path.join(temporary,'appdata')};
+  const env={...process.env,API_PLUS_GATEWAY_BASE:'',API_GATEWAY_BASE:'',API_BATCH_DATA_DIR:'',API_PLUS_WORKBENCH_ROOT:'',API_PLUS_AGENT_BASE_URL:'',API_PLUS_AGENT_TOKEN:'',APPDATA:path.join(temporary,'appdata')};
   let pid;
   async function run(args,options={}) {
     const child=spawn(process.execPath,[path.join(clone,'scripts/workbench-manage.cjs'),...args],{env,cwd:clone,windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -39,6 +39,25 @@ test('fresh clone installs a linked skill, updates from Git and preserves privat
   const setup=await run(['setup','--port',String(port),'--data-dir',data,'--skills-dir',skills]);
   assert.equal(setup.url,`http://127.0.0.1:${port}/`);
   const caps=await run(['cli','capabilities']);pid=caps.instance.pid;
+  assert.equal(caps.gateway.configured,false);
+  assert.equal(setup.gateway.configured,false);
+  const gatewayRoute=setup.url+'api/control/v1/gateway';
+  assert.equal((await fetch(gatewayRoute)).status,401);
+  const session=await fetch(setup.url+'api/control/v1/session');
+  const cookie=session.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(gatewayRoute,{headers:{Cookie:cookie,Origin:'https://untrusted.example'}})).status,403);
+  const configured=await fetch(gatewayRoute,{method:'PUT',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({apiBase:'https://gateway.example/api/'})});
+  assert.equal(configured.status,200);
+  assert.equal((await configured.json()).apiBase,'https://gateway.example/api');
+  assert.equal((await run(['cli','capabilities'])).gateway.configured,true);
+  assert.equal(JSON.stringify(await run(['doctor'])).includes('gateway.example'),false);
+  assert.equal((await fetch(setup.url+'data/gateway.json')).status,403);
+  const privateFile=path.join(temporary,'gateway.txt');
+  fs.writeFileSync(privateFile,'https://recipient.example/api\n');
+  const saved=await run(['configure','--gateway-file',privateFile]);
+  assert.equal(saved.gateway.configured,true);
+  assert.equal(JSON.stringify(saved).includes('recipient.example'),false);
+  assert.equal((await (await fetch(gatewayRoute,{headers:{Cookie:cookie}})).json()).apiBase,'https://recipient.example/api');
   assert.equal(caps.instance.root,clone);assert.equal(caps.instance.dataDir,data);
   assert.equal((await fetch(setup.url)).status,200);
   fs.writeFileSync(path.join(data,'private-sentinel.txt'),'preserve local data');
@@ -57,6 +76,9 @@ test('fresh clone installs a linked skill, updates from Git and preserves privat
   const updatedCaps=await run(['cli','capabilities']);pid=updatedCaps.instance.pid;
   assert.notEqual(pid,caps.instance.pid);
   assert.equal(updatedCaps.instance.dataDir,data);
+  assert.equal(updatedCaps.gateway.configured,true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data,'gateway.json'),'utf8')).apiBase,'https://recipient.example/api');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(result.backup,'data','gateway.json'),'utf8')).apiBase,'https://recipient.example/api');
   assert.equal(git(clone,'status','--porcelain'),'');
   const installed=execFileSync(process.execPath,[path.join(skills,'api-plus-agent/scripts/workbench.cjs'),'capabilities'],{env,encoding:'utf8',windowsHide:true});
   assert.equal(JSON.parse(installed).instance.pid,pid);

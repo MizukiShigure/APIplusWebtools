@@ -88,7 +88,7 @@ The same history data is mirrored in IndexedDB and the disk backup. Merge logic 
 
 `scripts/build-portable.ps1` copies only an explicit allowlist. It then:
 
-- preserves the approved company API Base and neutral node templates, not personal credentials;
+- leaves API Base empty and preserves neutral node templates, never private gateway addresses or credentials;
 - creates an empty `data` directory; `runtime` is empty unless an explicit Node executable and license are supplied;
 - excludes Git metadata, browser data, history files, logs, generated archives, and planning notes;
 - includes launchers, source, tests, engineering docs, and this Agent guide.

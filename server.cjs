@@ -13,6 +13,7 @@ const port = Number(process.env.PORT || 4198);
 const host = process.env.HOST || "127.0.0.1";
 if (!validateLoopbackHost(host)) throw new Error("HOST must remain loopback-only (127.0.0.1, localhost, or ::1)");
 const dataDir = resolveDataDirectory({ root, env: process.env });
+const gatewayConfig = require('./gateway-config.cjs').createGatewayConfig({ dataDir });
 if (process.env.API_PLUS_HEADLESS_LOGS === "1") {
   const logDir = path.join(dataDir, "logs");
   fs.mkdirSync(logDir, { recursive: true });
@@ -28,9 +29,9 @@ const legacyProjectHistoryFile = path.join(root, "data", "history.json");
 const historyBackupFiles = Array.from(new Set([
   historyFile, legacyProjectHistoryFile, fallbackHistoryFile
 ]));
-const agentServicePromise = createAgentService({ root, dataDir, headless: true, headlessCapabilities: () => workbenchCatalog.getCapabilities() });
+const agentServicePromise = createAgentService({ root, dataDir, headless: true, gatewayStatus: () => gatewayConfig.status(), headlessCapabilities: () => workbenchCatalog.getCapabilities() });
 let headlessExecutor = null;
-const avatarWorkflowPromise = agentServicePromise.then(agentService => createAvatarWorkflowService({ root, dataDir, agentService }));
+const avatarWorkflowPromise = agentServicePromise.then(agentService => createAvatarWorkflowService({ root, dataDir, agentService, getGateway: () => gatewayConfig.read().apiBase }));
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -53,7 +54,7 @@ function safePath(urlPath) {
   const relative = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
   const full = path.resolve(root, relative);
   const parts = relative.replace(/\\/g, "/").split("/").map(part => part.toLowerCase().replace(/[ .]+$/g, ""));
-  if (parts.some(part => part.startsWith(".") || ["data", "avatar-workflow", "local-config.json"].includes(part))) return null;
+  if (parts.some(part => part.startsWith(".") || ["data", "avatar-workflow", "local-config.json", "gateway.json"].includes(part))) return null;
   const within = path.relative(root, full);
   return within && !within.startsWith("..") && !path.isAbsolute(within) && !within.includes(":") ? full : null;
 }
@@ -426,6 +427,22 @@ async function routeApi(request, response, pathname, parsedUrl) {
     if (await (await avatarWorkflowPromise).route(request, response, pathname, parsedUrl)) return true;
     if (await routePromptLibrary(request, response, pathname, parsedUrl, agentService)) return true;
     if (await agentService.route(request, response, pathname, parsedUrl)) return true;
+    // Unhandled control routes have already passed the loopback/session guard.
+    if (pathname === '/api/control/v1/gateway') {
+      response.setHeader('Cache-Control', 'no-store');
+      if (request.method === 'GET') sendJson(response, 200, gatewayConfig.read());
+      else if (request.method === 'PUT') {
+        if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers['content-type'] || ''))) {
+          sendJson(response, 415, { success: false, error: 'json_required' }); return true;
+        }
+        const body = await readJsonBody(request, 8192);
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'apiBase')) {
+          sendJson(response, 400, { success: false, error: 'Expected apiBase only' }); return true;
+        }
+        sendJson(response, 200, gatewayConfig.save(body.apiBase));
+      } else { response.setHeader('Allow', 'GET, PUT'); sendJson(response, 405, { success: false, error: 'method_not_allowed' }); }
+      return true;
+    }
     if (pathname.startsWith("/api/runninghub/") || pathname === "/api/local/history") {
       if (await agentService.route(request, response, "/api/control/v1/runninghub-auth", parsedUrl)) return true;
     }
@@ -490,7 +507,7 @@ http.createServer(async (request, response) => {
   console.log(`History backup file: ${historyFile}`);
   console.log(`History backup fallback: ${fallbackHistoryFile}`);
   agentServicePromise.then(service => {
-    headlessExecutor = createHeadlessExecutor({ service, localBase: `http://${host}:${port}`,
+    headlessExecutor = createHeadlessExecutor({ service, localBase: `http://${host}:${port}`, getGateway: () => gatewayConfig.read().apiBase,
       onError: error => console.error(`Headless worker error: ${error.message}`) });
     headlessExecutor.start();
   }).catch(error => console.error(`Headless startup failed: ${error.message}`));

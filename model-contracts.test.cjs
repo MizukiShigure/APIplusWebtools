@@ -427,7 +427,7 @@ for (const dependency of ["model-contracts.js", "prompt-detail-utils.js", "histo
   assert.ok(scripts.includes(dependency) && scripts.indexOf(dependency) < scripts.indexOf("app.js"), `${dependency} must load before app.js`);
 }
 assert.match(pageSource, /model-contracts\.js\?v=update-20261115-image-models/, "Current models must bypass cached model metadata");
-assert.match(pageSource, /app\.js\?v=update-20261115-image-models/, "Current application fixes must bypass cached application code");
+assert.match(pageSource, /app\.js\?v=update-20261118-local-gateway/, "Current application fixes must bypass cached application code");
 assert.match(appSource, /const MODEL_CONTRACTS = globalThis\.ApiBatchModelContracts;/, "app must consume the browser contract module");
 assert.match(appSource, /endpoint: KLING_3_OMNI\.endpoint/, "Kling create path must come from the contract");
 assert.match(appSource, /queryEndpoint: KLING_3_OMNI\.queryEndpoint/, "Kling query path must come from the contract");

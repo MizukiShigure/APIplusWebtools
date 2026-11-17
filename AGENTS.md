@@ -24,7 +24,7 @@ Before changing code, read these files in order:
 - Do not change existing storage keys without a backward-compatible migration.
 - Do not resubmit an asynchronous job after refresh when a remote task ID already exists. Resume the query endpoint instead.
 - Do not revert unrelated user changes in a dirty worktree.
-- Preserve the approved company API Base and neutral RunningHub node templates. Never distribute personal keys, workflow IDs, or browser configuration.
+- Public code must not contain the real company gateway address. On first setup check `gateway.configured` in capabilities; if false, guide the user to fill API Base on their local page using the address supplied privately by their administrator. It is saved in the private data directory as `gateway.json`, shared by browser and Agent, and retained during sync. Never guess an address, recover it from old Git history, or upload it. Preserve neutral RunningHub node templates, but never distribute personal keys, workflow IDs, or browser configuration.
 - Keep the local server bound to `127.0.0.1` by default. A broader host binding is an explicit deployment decision.
 - Provider credentials belong in runtime configuration, never source code.
 

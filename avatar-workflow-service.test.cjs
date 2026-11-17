@@ -22,7 +22,7 @@ async function fixture(t, overrides = {}) {
     avatarQuery: async () => ({ state: 'done', url: 'https://assets.example/video.mp4' }),
     ...overrides
   };
-  const service = createAvatarWorkflowService({ dataDir, store, media,
+  const service = createAvatarWorkflowService({ dataDir, store, media, getGateway: () => 'https://gateway.example/api',
     root: dataDir, agentService: { historyStore: { append: async event => events.push(event) } },
     autoStart: false, pollMs: 1 });
   t.after(async () => { await service.close(); await fs.rm(dataDir, { recursive: true, force: true }); });

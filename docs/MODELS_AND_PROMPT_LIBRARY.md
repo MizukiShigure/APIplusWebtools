@@ -2,7 +2,7 @@
 
 ## November 2026 image models
 
-Verified on 2026-11-15 against the [company frontend](https://gateway.example/) and [OpenAPI](https://gateway.example/openapi.json). The image page and headless CLI use the same contracts.
+Verified on 2026-11-15 against the privately supplied company frontend and OpenAPI. Obtain their addresses from your administrator; they are intentionally omitted from public source. The image page and headless CLI use the same contracts.
 
 | Local model | Versions | Create / Query | Options |
 | --- | --- | --- | --- |

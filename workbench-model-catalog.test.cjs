@@ -27,7 +27,7 @@ test('new image models share browser/headless contracts and advertise GIF contro
 test('a browser-free production model catalog is available', () => {
   assert.ok(fs.existsSync(modulePath), 'headless catalog adapter must exist');
   const catalog = load();
-  assert.match(catalog.DEFAULT_GATEWAY, /^https:\/\//);
+  assert.equal(catalog.DEFAULT_GATEWAY, '', 'public catalog must not embed a company gateway');
   assert.deepEqual(Object.keys(catalog.getCatalogs()).filter(key => key !== 'audio').sort(),
     ['avatar', 'image', 'imageVideo', 'motion', 'multiVideo']);
   assert.equal(catalog.getCapabilities().execution, 'headless');

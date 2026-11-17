@@ -288,6 +288,7 @@ async function createAgentService(options = {}) {
       localOnly: true,
       instance: { pid: process.pid, root, dataDir },
       execution: options.headless ? "headless" : "browser-worker",
+      ...(options.gatewayStatus ? { gateway: options.gatewayStatus() } : {}),
       auth: { localCli: options.headless ? "header-loopback" : "bearer", browser: "bearer-same-origin" },
       remoteAccess: { enabled: false },
       worker: options.headless ? { online: true, type: "headless", id: "local-service", label: "Local background service" } : publicWorkerStatus(),

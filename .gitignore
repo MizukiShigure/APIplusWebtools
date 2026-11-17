@@ -1,6 +1,7 @@
 # Local runtime and dependencies
 node_modules/
 .workbench-local.json
+gateway.json
 .workbench-backups/
 .workbench-downloads/
 .env

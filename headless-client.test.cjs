@@ -94,7 +94,7 @@ test('CLI auto-starts a hidden local server, uploads, generates and recreates th
     res.end(JSON.stringify({ success: true, data: { image_url: `https://cdn.example/${body.task_id}.png` } }));
   });
   await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
-  const env = { ...process.env, API_PLUS_WORKBENCH_ROOT: checkout, APPDATA: path.join(root, 'appdata'), API_PLUS_AGENT_SOURCE_CLIENT: 'codex', API_PLUS_AGENT_SOURCE_ID: 'browser-history-fixture', API_PLUS_AGENT_SOURCE_LABEL: 'Agent history fixture', API_PLUS_AGENT_TOKEN: '', API_PLUS_AGENT_AUTOSTART: '1', API_PLUS_AGENT_BASE_URL: `http://127.0.0.1:${port}/api/agent/v1`, API_BATCH_DATA_DIR: path.join(root, 'data'), API_PLUS_GATEWAY_BASE: `http://127.0.0.1:${gateway.address().port}/api` };
+  const env = { ...process.env, API_PLUS_WORKBENCH_ROOT: checkout, APPDATA: path.join(root, 'appdata'), API_PLUS_AGENT_SOURCE_CLIENT: 'codex', API_PLUS_AGENT_SOURCE_ID: 'browser-history-fixture', API_PLUS_AGENT_SOURCE_LABEL: 'Agent history fixture', API_PLUS_AGENT_TOKEN: '', API_PLUS_AGENT_AUTOSTART: '1', API_PLUS_AGENT_BASE_URL: `http://127.0.0.1:${port}/api/agent/v1`, API_BATCH_DATA_DIR: path.join(root, 'data'), API_PLUS_GATEWAY_BASE: '', API_GATEWAY_BASE: '' };
   let serverPid;
   t.after(async () => {
     if (serverPid) { try { process.kill(serverPid); } catch {} }
@@ -120,6 +120,32 @@ test('CLI auto-starts a hidden local server, uploads, generates and recreates th
   assert.equal(caps.execution, 'headless');
   assert.equal(caps.instance.dataDir, env.API_BATCH_DATA_DIR);
   serverPid = caps.instance.pid;
+  assert.equal(caps.gateway.configured, false);
+  const apiBase = `http://127.0.0.1:${gateway.address().port}/api`;
+  if (process.env.PROMPT_LIBRARY_PLAYWRIGHT) {
+    const { chromium } = require(process.env.PROMPT_LIBRARY_PLAYWRIGHT);
+    const browser = await chromium.launch({ headless: true, channel: process.env.AWF_BROWSER_CHANNEL || 'chrome' });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`http://127.0.0.1:${port}/`);
+      await page.locator('#apiBase').waitFor();
+      assert.equal(await page.locator('#apiBase').inputValue(), '');
+      await page.locator('#apiBase').fill(apiBase + '/');
+      await page.locator('#apiBase').press('Tab');
+      await page.waitForFunction(() => document.querySelector('#gatewayConfigHint')?.textContent.includes('Agent'));
+      assert.equal((await cli(['capabilities'])).gateway.configured, true);
+      await page.reload();
+      await page.locator('#apiBase').waitFor();
+      assert.equal(await page.locator('#apiBase').inputValue(), apiBase);
+    } finally { await browser.close(); }
+  } else {
+    const session = await fetch(`http://127.0.0.1:${port}/api/control/v1/session`);
+    const configured = await fetch(`http://127.0.0.1:${port}/api/control/v1/gateway`, { method: 'PUT', headers: {
+      Cookie: session.headers.get('set-cookie').split(';')[0], 'Content-Type': 'application/json'
+    }, body: JSON.stringify({ apiBase }) });
+    assert.equal(configured.status, 200);
+  }
+  assert.equal(JSON.parse(await fs.readFile(path.join(env.API_BATCH_DATA_DIR,'gateway.json'),'utf8')).apiBase, apiBase);
   const source = path.join(root, 'source.png'); await fs.writeFile(source, 'isolated upload bytes');
   const { asset } = await cli(['upload', source]);
   const inputFile = path.join(root, 'task.json');
@@ -152,6 +178,8 @@ test('CLI auto-starts a hidden local server, uploads, generates and recreates th
         return route.fulfill({status:200,contentType:'image/gif',body:Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64')});
       });
       await page.goto(`http://127.0.0.1:${port}/`);
+      await page.locator('#apiBase').waitFor();
+      assert.equal(await page.locator('#apiBase').inputValue(), apiBase, 'a fresh browser reads the shared disk setting');
       assert.equal(errors.length,0,JSON.stringify(errors));
       try { await page.locator('[data-page="history"]').click({timeout:10000}); }
       catch(error) { throw new Error(`${error.message}; pending=${JSON.stringify([...pending])}; body=${(await page.locator('body').innerText()).slice(0,1000)}; errors=${JSON.stringify(errors)}`); }

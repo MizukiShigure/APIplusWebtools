@@ -13,7 +13,7 @@
     "sync": "node scripts/workbench-manage.cjs sync",
     "doctor": "node scripts/workbench-manage.cjs doctor",
     "test:setup": "node --test workbench-manage.test.cjs workbench-sync-integration.test.cjs",
-    "pretest": "node --test workbench-manage.test.cjs workbench-sync-integration.test.cjs avatar-workflow-store.test.cjs avatar-workflow-media.test.cjs avatar-workflow-service.test.cjs avatar-workflow-server.test.cjs avatar-workflow-ui.test.cjs avatar-workflow-production.test.cjs avatar-workflow-production-races.test.cjs runninghub-shared.test.cjs avatar-workflow-browser.test.cjs history-performance.test.cjs history-performance-browser.test.cjs",
+    "pretest": "node --test gateway-config.test.cjs workbench-manage.test.cjs workbench-sync-integration.test.cjs avatar-workflow-store.test.cjs avatar-workflow-media.test.cjs avatar-workflow-service.test.cjs avatar-workflow-server.test.cjs avatar-workflow-ui.test.cjs avatar-workflow-production.test.cjs avatar-workflow-production-races.test.cjs runninghub-shared.test.cjs avatar-workflow-browser.test.cjs history-performance.test.cjs history-performance-browser.test.cjs",
     "start": "node server.cjs",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1",
     "package:skills": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-skills.ps1",

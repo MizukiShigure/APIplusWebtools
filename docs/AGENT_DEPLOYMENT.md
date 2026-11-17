@@ -8,7 +8,7 @@ Use this guide to configure a recipient's local installation. The portable Windo
 
 - Keep the server on `127.0.0.1`. Do not configure firewall openings, public tunnels, or remote access as part of setup.
 - Preserve existing data, tokens, browser storage, and running tasks. Never clear history to fix startup.
-- Use the approved company gateway default. Do not replace it with a public provider or invent routes/model IDs.
+- No company gateway is embedded. Check `capabilities.gateway.configured`; if false, guide the recipient to fill API Base on the local page using the address privately supplied by their administrator. Keep it in local `gateway.json`; never guess, retrieve it from historical Git commits, or add it to public source. Do not invent routes/model IDs.
 - Never ask the user to paste credentials into chat. Credentials stay in the local browser configuration or process environment.
 - Read-only startup and capability checks verify deployment. Submit real media when the user's request authorizes it; document live provider evidence separately from local/mock checks.
 - Back up data before upgrades. Do not stop an unrelated Node process or another PM2 project to free a port.
@@ -67,7 +67,7 @@ Rebuild a clean full package (choose a new output name):
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -NodeRuntimePath runtime/node.exe -NodeLicensePath runtime/LICENSE -OutputPath dist/Workbench-Windows-x64.zip
 ```
 
-Without the two runtime parameters the builder produces a source-only package. It always uses an explicit public-file allowlist; never ZIP a used working directory recursively. Inspect the archive for personal records and credentials. Source-only and full packages both preserve the company gateway and neutral node templates.
+Without the two runtime parameters the builder produces a source-only package. It always uses an explicit public-file allowlist; never ZIP a used working directory recursively. Inspect the archive for personal records, gateway addresses and credentials. Source-only and full packages both leave API Base empty and preserve neutral node templates.
 
 ## Handoff Report
 

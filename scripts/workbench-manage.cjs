@@ -7,6 +7,7 @@ const net = require('node:net');
 const {execFileSync, spawn} = require('node:child_process');
 const {pathToFileURL} = require('node:url');
 const ROOT = path.resolve(__dirname, '..');
+const { createGatewayConfig } = require('../gateway-config.cjs');
 const CONFIG = '.workbench-local.json';
 const git = (root, ...args) => execFileSync('git', args, {cwd:root, encoding:'utf8', windowsHide:true, stdio:['ignore','pipe','pipe']}).trim();
 const json = file => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file,'utf8')) : null;
@@ -28,8 +29,8 @@ function saveConfig(config) {
 function skillFiles(config) {
   const launcher = path.join(config.root,'scripts','workbench-manage.cjs');
   return {
-    'SKILL.md':`---\nname: api-plus-agent\ndescription: Use APIplusWebtools for media generation, shared browser and Agent history, setup, or synchronizing this installed project with GitHub.\n---\n\n# API Plus Workbench\n\nInstalled checkout: ${config.root}\n\nBefore media operations read [the current skill](${path.join(config.root,'skills/api-plus-agent/SKILL.md').replaceAll('\\','/')}). This link always follows the checkout version.\n\nRun the local Node executable ${config.node} with this skill's scripts/workbench.cjs, followed by the command. On Windows scripts/workbench.ps1 selects the same runtime automatically.\n\n- Media: capabilities, upload, submit, wait, status, history, events, recreate, cancel. Set API_PLUS_AGENT_SOURCE_CLIENT, API_PLUS_AGENT_SOURCE_ID and API_PLUS_AGENT_SOURCE_LABEL for each task. All uploads/submissions go through the workbench so the browser shows their records.\n- User says “同步项目 / update workbench”: read ${path.join(config.root,'docs/GIT_WORKFLOW.md')}, then run sync. A requested sync authorizes fetching and fast-forwarding upstream code, refreshing this skill, and restarting the owned idle service. Preserve local edits and all private data.\n- Installation status: run doctor.\n- Contribute changes: follow docs/GIT_WORKFLOW.md in the checkout; prepare a branch and PR for the maintainer to select. Sync never pushes or merges contributions automatically.\n\nOnly this checkout is selected. Do not create another workbench or call providers directly. If this directory moved, run setup from its new location with a new skill destination; preserve the old link until verified.\n`,
-    'scripts/workbench.cjs':`const fs=require('node:fs');\nconst path=require('node:path');\nconst {spawnSync}=require('node:child_process');\nconst link=JSON.parse(fs.readFileSync(path.join(__dirname,'../.workbench-link.json'),'utf8'));\nconst args=process.argv.slice(2);\nconst mode=['sync','doctor','setup','stop'].includes(args[0])?[]:['cli'];\nconst result=spawnSync(process.execPath,[path.join(link.root,'scripts/workbench-manage.cjs'),...mode,...args],{stdio:'inherit',windowsHide:true});\nif(result.error)console.error(result.error.message);\nprocess.exit(result.status===null?1:result.status);\n`,
+    'SKILL.md':`---\nname: api-plus-agent\ndescription: Use APIplusWebtools for media generation, shared browser and Agent history, setup, or synchronizing this installed project with GitHub.\n---\n\n# API Plus Workbench\n\nInstalled checkout: ${config.root}\n\nBefore media operations read [the current skill](${path.join(config.root,'skills/api-plus-agent/SKILL.md').replaceAll('\\','/')}). This link always follows the checkout version.\n\nRun the local Node executable ${config.node} with this skill's scripts/workbench.cjs, followed by the command. On Windows scripts/workbench.ps1 selects the same runtime automatically.\n\n- Media: capabilities, upload, submit, wait, status, history, events, recreate, cancel. Set API_PLUS_AGENT_SOURCE_CLIENT, API_PLUS_AGENT_SOURCE_ID and API_PLUS_AGENT_SOURCE_LABEL for each task. All uploads/submissions go through the workbench so the browser shows their records.\n- User says “同步项目 / update workbench”: read ${path.join(config.root,'docs/GIT_WORKFLOW.md')}, then run sync. A requested sync authorizes fetching and fast-forwarding upstream code, refreshing this skill, and restarting the owned idle service. Preserve local edits and all private data.\n- Installation status: run doctor. If gateway.configured is false, guide the user to enter their administrator-provided gateway into API Base on the local page. The private gateway.json is shared by browser and Agent and retained by sync. Read docs/CHANNEL_CONFIGURATION.md for RunningHub, Suno and other sources. Never add private addresses to public source or recover them from Git history.\n- Contribute changes: follow docs/GIT_WORKFLOW.md in the checkout; prepare a branch and PR for the maintainer to select. Sync never pushes or merges contributions automatically.\n\nOnly this checkout is selected. Do not create another workbench or call providers directly. If this directory moved, run setup from its new location with a new skill destination; preserve the old link until verified.\n`,
+    'scripts/workbench.cjs':`const fs=require('node:fs');\nconst path=require('node:path');\nconst {spawnSync}=require('node:child_process');\nconst link=JSON.parse(fs.readFileSync(path.join(__dirname,'../.workbench-link.json'),'utf8'));\nconst args=process.argv.slice(2);\nconst mode=['sync','doctor','setup','stop','configure'].includes(args[0])?[]:['cli'];\nconst result=spawnSync(process.execPath,[path.join(link.root,'scripts/workbench-manage.cjs'),...mode,...args],{stdio:'inherit',windowsHide:true});\nif(result.error)console.error(result.error.message);\nprocess.exit(result.status===null?1:result.status);\n`,
     'scripts/workbench.ps1':`$ErrorActionPreference = 'Stop'\n$link = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../.workbench-link.json') -Raw -Encoding UTF8 | ConvertFrom-Json\n$node = $link.node\nif (-not (Test-Path -LiteralPath $node)) { $node = (Get-Command node -ErrorAction Stop).Source }\n& $node (Join-Path $PSScriptRoot 'workbench.cjs') @args\nexit $LASTEXITCODE\n`
   };
 }
@@ -117,7 +118,9 @@ async function setup(config) {
   await client.ensureLocalService(environment(config));
   const skills=config.skillsDirs.map(dir=>installSkill(config,dir));
   saveConfig(config);
-  return {success:true,version:fs.readFileSync(path.join(config.root,'VERSION'),'utf8').trim(),url:`http://127.0.0.1:${config.port}/`,dataDir:config.dataDir,skills};
+  const gateway=createGatewayConfig({dataDir:config.dataDir}).status();
+  return {success:true,version:fs.readFileSync(path.join(config.root,'VERSION'),'utf8').trim(),url:`http://127.0.0.1:${config.port}/`,dataDir:config.dataDir,skills,gateway,
+    ...(!gateway.configured ? {nextStep:'Ask the user to enter their administrator-provided gateway in API Base on the local page. It is saved privately for browser and Agent use.'} : {})};
 }
 async function sync(config,options={}) {
   assertSyncReady(config.root);
@@ -149,16 +152,24 @@ async function main(args=process.argv.slice(2)) {
     child.once('exit',code=>{process.exitCode=code===null?1:code;}); return;
   }
   const opts={};
-  while(args.length) {const flag=args.shift(); if(!['--skills-dir','--port','--data-dir','--remote'].includes(flag) || !args.length)throw new Error(`Unknown/missing option: ${flag}`);opts[flag.slice(2)]=args.shift();}
+  while(args.length) {const flag=args.shift(); if(!['--skills-dir','--port','--data-dir','--remote','--gateway-file'].includes(flag) || !args.length)throw new Error(`Unknown/missing option: ${flag}`);opts[flag.slice(2)]=args.shift();}
   if(opts['skills-dir']) config.skillsDirs=[...new Set([...config.skillsDirs,path.resolve(opts['skills-dir'])])];
   if(opts['data-dir']) config.dataDir=path.resolve(opts['data-dir']);
   if(opts.port) {config.port=Number(opts.port);if(!Number.isInteger(config.port)||config.port<1||config.port>65535)throw new Error('Invalid port');}
   let result;
-  if(command==='setup') result=await setup(config);
+  if(command==='configure') {
+    const gateway=createGatewayConfig({dataDir:config.dataDir});
+    if((await service(config))?.gateway?.source==='environment') throw new Error('API Base is controlled by the running service environment; update or remove that override first');
+    if(!opts['gateway-file']) throw new Error('Enter API Base on the local workbench page, or use configure --gateway-file <private UTF-8 file containing the URL>');
+    gateway.save(fs.readFileSync(path.resolve(opts['gateway-file']),'utf8').replace(/^\uFEFF/,''));
+    saveConfig(config);
+    result={success:true,gateway:gateway.status()};
+  }
+  else if(command==='setup') result=await setup(config);
   else if(command==='sync') result=await sync(config,opts);
   else if(command==='stop') {await stop(config);result={success:true,stopped:true};}
-  else if(command==='doctor') {const caps=await service(config);result={...config,running:!!caps,version:fs.readFileSync(path.join(ROOT,'VERSION'),'utf8').trim(),execution:caps?.execution || null};}
-  else throw new Error('Commands: setup, sync, doctor, stop, cli <media command>');
+  else if(command==='doctor') {const caps=await service(config);result={...config,running:!!caps,version:fs.readFileSync(path.join(ROOT,'VERSION'),'utf8').trim(),execution:caps?.execution || null,gateway:caps?.gateway || createGatewayConfig({dataDir:config.dataDir}).status()};}
+  else throw new Error('Commands: setup, configure, sync, doctor, stop, cli <media command>');
   console.log(JSON.stringify(result,null,2));
 }
 module.exports={loadConfig,saveConfig,installSkill,checkSkill,assertSyncReady,assertIdle,updateRemote,setup,sync,service,stop};

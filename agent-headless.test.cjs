@@ -35,6 +35,26 @@ test('native loopback CLI works without bearer while cross-origin and browser fe
   assert.equal((await f.request('/capabilities', undefined, { Authorization: 'Bearer wrong' })).status, 401);
 });
 
+test('missing gateway fails without network traffic, then a saved gateway works without restart', async t => {
+  const f = await fixture(t);
+  const { createHeadlessExecutor } = require('./agent-headless.cjs');
+  let base = '', calls = 0;
+  const executor = createHeadlessExecutor({ service: f.service, getGateway: () => base, fetchImpl: async url => {
+    calls++; assert.ok(url.startsWith(base));
+    return new Response(JSON.stringify({ success: true, data: { image_url: 'https://cdn.example/configured.png' } }));
+  } });
+  const first = await f.request('/tasks', { clientTaskId: 'unconfigured', taskType: 'image', input: { model: 'nano', prompt: 'fixture' } });
+  await executor.drain();
+  assert.equal(f.service.getTask(first.json.task.taskId).state, 'failed');
+  assert.match(f.service.getTask(first.json.task.taskId).error.message, /configure API Base/);
+  assert.equal(calls, 0);
+  base = 'https://recipient.example/api';
+  const next = await f.request('/tasks', { clientTaskId: 'configured', taskType: 'image', input: { model: 'nano', prompt: 'fixture' } });
+  await executor.drain();
+  assert.equal(f.service.getTask(next.json.task.taskId).state, 'completed');
+  assert.equal(calls, 1);
+});
+
 test('headless ownership prevents browser claim and concurrent idempotent POSTs create one task', async t => {
   const f = await fixture(t);
   const body = { clientTaskId: 'same-one', taskType: 'image', input: { prompt: 'Original exact prompt' }, origin: { client: 'codex', id: 'one', label: 'One' } };
@@ -82,7 +102,7 @@ test('backend persists exact payload before submission, upstream ID before poll,
     return new Response(JSON.stringify({ success: true, data: { video_url: 'https://cdn.example/result.mp4' } }));
   };
   const prepareTask = async task => ({ taskType: 'multiVideo', row: { ...task.input, model: 'demo', refs: [] }, config: { label: 'Demo' }, payload: { prompt: task.input.prompt, ratio: '4:3' }, endpoint: '/create', queryEndpoint: '/query', async: true, mediaType: 'video' });
-  const executor = createHeadlessExecutor({ service: f.service, prepareTask, fetchImpl, gateway: 'https://gateway.example/api', pollMs: 1 });
+  const executor = createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, prepareTask, fetchImpl, gateway: 'https://gateway.example/api', pollMs: 1 });
   const created = await f.request('/tasks', { clientTaskId: 'exec-one', taskType: 'multiVideo', input: { prompt: 'exact prompt', count: 1 } });
   await executor.drain();
   const task = f.service.getTask(created.json.task.taskId);
@@ -105,14 +125,14 @@ test('restart resumes durable polling and refuses uncertain submissions without 
   await f.service.updateExecution(taskId, { jobs: [{ index: 0, state: 'polling', taskId: 'existing-id', queryEndpoint: '/query', endpoint: '/create', payload: { prompt: 'x' }, submittedAt: Date.now() }], preparedRow: { model: 'demo', prompt: 'x', images: [] }, mediaType: 'image', taskType: 'image' });
   const restarted = await createAgentService({ dataDir: f.dataDir, headless: true });
   let calls = 0;
-  const executor = createHeadlessExecutor({ service: restarted, prepareTask: () => { throw new Error('must use persisted payload'); }, fetchImpl: async (url) => { assert.ok(url.endsWith('/query')); calls++; return new Response(JSON.stringify({ success: true, data: { image_url: 'https://cdn.example/a.png' } })); }, gateway: 'https://gateway.example/api', pollMs: 1 });
+  const executor = createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: restarted, prepareTask: () => { throw new Error('must use persisted payload'); }, fetchImpl: async (url) => { assert.ok(url.endsWith('/query')); calls++; return new Response(JSON.stringify({ success: true, data: { image_url: 'https://cdn.example/a.png' } })); }, gateway: 'https://gateway.example/api', pollMs: 1 });
   await executor.drain();
   assert.equal(restarted.getTask(taskId).state, 'completed');
   assert.equal(calls, 1);
   const uncertain = await f.request('/tasks', { clientTaskId: 'uncertain', taskType: 'image', input: { prompt: 'x' } });
   await f.service.updateExecution(uncertain.json.task.taskId, { jobs: [{ index: 0, state: 'submitting', endpoint: '/create', payload: { prompt: 'x' } }], preparedRow: { model: 'demo' } });
   const again = await createAgentService({ dataDir: f.dataDir, headless: true });
-  await createHeadlessExecutor({ service: again, prepareTask: () => { throw new Error('must not prepare'); }, fetchImpl: () => { throw new Error('must not resubmit'); } }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: again, prepareTask: () => { throw new Error('must not prepare'); }, fetchImpl: () => { throw new Error('must not resubmit'); } }).drain();
   assert.equal(again.getTask(uncertain.json.task.taskId).state, 'submission-unknown');
 });
 
@@ -120,7 +140,7 @@ test('audio uses model normalizer for raw task IDs and honors a persisted task g
   const f = await fixture(t);
   const { createHeadlessExecutor } = require('./agent-headless.cjs');
   const visited = [];
-  const executor = createHeadlessExecutor({ service: f.service, pollMs: 1, fetchImpl: async (url, init) => {
+  const executor = createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, pollMs: 1, fetchImpl: async (url, init) => {
     visited.push(url);
     if (url.endsWith('/woosh_sound')) return new Response(JSON.stringify({ success: true, data: 'sound-opaque-id' }));
     assert.equal(JSON.parse(init.body).task_id, 'sound-opaque-id');
@@ -140,7 +160,7 @@ test('cancel during submission preserves returned remote ID and never starts pol
   const { createHeadlessExecutor } = require('./agent-headless.cjs');
   let taskId;
   let creates = 0;
-  const executor = createHeadlessExecutor({ service: f.service, prepareTask: async task => ({ row: task.input, taskType: 'image', mediaType: 'image', payload: { prompt: task.input.prompt }, endpoint: '/create', queryEndpoint: '/query', async: true }),
+  const executor = createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, prepareTask: async task => ({ row: task.input, taskType: 'image', mediaType: 'image', payload: { prompt: task.input.prompt }, endpoint: '/create', queryEndpoint: '/query', async: true }),
     fetchImpl: async url => {
       assert.ok(url.endsWith('/create')); creates++;
       await f.request(`/tasks/${taskId}/cancel`, {});
@@ -158,11 +178,11 @@ test('unreceived submit response is not retried and synchronous audio text is pr
   const { createHeadlessExecutor } = require('./agent-headless.cjs');
   const unknown = (await f.request('/tasks', { clientTaskId: 'lost-response', taskType: 'image', input: { model: 'nano', prompt: 'x' } })).json.task.taskId;
   let calls = 0;
-  await createHeadlessExecutor({ service: f.service, fetchImpl: async () => { calls++; throw new Error('connection reset'); } }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, fetchImpl: async () => { calls++; throw new Error('connection reset'); } }).drain();
   assert.equal(f.service.getTask(unknown).state, 'submission-unknown');
   assert.equal(calls, 1);
   const audio = (await f.request('/tasks', { clientTaskId: 'text-alias', taskType: 'audio', input: { model: 'minimaxTts', prompt: '', options: { text: 'Speech from options', voiceId: 'male-qn-qingse' } } })).json.task.taskId;
-  await createHeadlessExecutor({ service: f.service, fetchImpl: async () => new Response(JSON.stringify({ success: true, data: { audio_url: 'https://cdn.example/speech.mp3' } })) }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, fetchImpl: async () => new Response(JSON.stringify({ success: true, data: { audio_url: 'https://cdn.example/speech.mp3' } })) }).drain();
   assert.equal(f.service.getTask(audio).state, 'completed', f.service.getTask(audio).error?.message);
   assert.equal(f.service.getHistory().find(record => record.taskId === audio).prompt, 'Speech from options');
 });
@@ -180,7 +200,7 @@ test('repeated staged descriptors upload once and persisted URLs remain reusable
     return new Response(JSON.stringify({ success: true, data: { image_url: 'https://cdn.example/done.png' } }));
   };
   const first = (await f.request('/tasks', { clientTaskId: 'repeat-reference', taskType: 'image', input: { model: 'nano', prompt: 'x', assets: { images: [asset, asset] } } })).json.task;
-  await createHeadlessExecutor({ service: f.service, fetchImpl }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, fetchImpl }).drain();
   assert.equal(f.service.getTask(first.taskId).state, 'completed');
   assert.equal(uploads, 1);
   const resolved = f.service.getTask(first.taskId).execution.resolvedInput;
@@ -188,7 +208,7 @@ test('repeated staged descriptors upload once and persisted URLs remain reusable
   await fs.rm(path.join(f.dataDir, 'staging', asset.assetId + '.json'), { force: true });
   const restarted = await createAgentService({ dataDir: f.dataDir, headless: true });
   const next = await restarted.createTask({ clientTaskId: 'repeat-after-cleanup', taskType: 'image', input: resolved });
-  await createHeadlessExecutor({ service: restarted, fetchImpl }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: restarted, fetchImpl }).drain();
   assert.equal(restarted.getTask(next.task.taskId).state, 'completed', restarted.getTask(next.task.taskId).error?.message);
   assert.equal(uploads, 1);
 });
@@ -213,7 +233,7 @@ test('RunningHub file identifiers and ephemeral credentials reach submit and que
     assert.ok(url.endsWith('/query'));
     return new Response(JSON.stringify({ success: true, data: { video_url: 'https://cdn.example/rh.mp4' } }));
   };
-  await createHeadlessExecutor({ service: f.service, fetchImpl, localBase: 'http://127.0.0.1:4198' }).drain();
+  await createHeadlessExecutor({ getGateway: () => '', service: f.service, fetchImpl, localBase: 'http://127.0.0.1:4198' }).drain();
   assert.equal(f.service.getTask(task.taskId).state, 'completed', f.service.getTask(task.taskId).error?.message);
   assert.equal(seen.length, 4);
   assert.equal((await fs.readFile(path.join(f.dataDir, 'tasks/events.ndjson'), 'utf8')).includes(credential), false);
@@ -225,7 +245,7 @@ test('submit response stream loss retains submission-unknown and does not retry 
   const { createHeadlessExecutor } = require('./agent-headless.cjs');
   const taskId = (await f.request('/tasks', { clientTaskId: 'body-disconnect', taskType: 'image', input: { model: 'nano', prompt: 'x' } })).json.task.taskId;
   let calls = 0;
-  await createHeadlessExecutor({ service: f.service, fetchImpl: async () => { calls++; return { ok: true, status: 200, text: async () => { throw new Error('stream interrupted'); } }; } }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service: f.service, fetchImpl: async () => { calls++; return { ok: true, status: 200, text: async () => { throw new Error('stream interrupted'); } }; } }).drain();
   assert.equal(f.service.getTask(taskId).state, 'submission-unknown');
   assert.equal(calls, 1);
 });
@@ -246,7 +266,7 @@ test('provider error text cannot echo a runtime credential into the task journal
   const { createHeadlessExecutor } = require('./agent-headless.cjs');
   const secret = 'example-ephemeral-echo-fixture';
   const taskId = (await f.request('/tasks', { clientTaskId:'secret-error', taskType:'image', input:{ prompt:'x', runningHub:{apiKey:secret} } })).json.task.taskId;
-  await createHeadlessExecutor({ service:f.service, prepareTask:async task => ({taskType:'image',row:task.input,payload:{prompt:'x'},endpoint:'/create',mediaType:'image'}), fetchImpl:async () => new Response(JSON.stringify({success:false,message:`Rejected credential ${secret}`})) }).drain();
+  await createHeadlessExecutor({ gateway: 'https://gateway.example/api', service:f.service, prepareTask:async task => ({taskType:'image',row:task.input,payload:{prompt:'x'},endpoint:'/create',mediaType:'image'}), fetchImpl:async () => new Response(JSON.stringify({success:false,message:`Rejected credential ${secret}`})) }).drain();
   assert.equal(f.service.getTask(taskId).state,'failed');
   assert.equal(f.service.getTask(taskId).error.message.includes(secret),false);
   assert.equal((await fs.readFile(path.join(f.dataDir,'tasks/events.ndjson'),'utf8')).includes(secret),false);

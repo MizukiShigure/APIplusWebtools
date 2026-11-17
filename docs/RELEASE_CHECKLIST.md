@@ -47,7 +47,7 @@ Verify:
 - all tests referenced by `package.json` are present;
 - `data` contains only `.keep`;
 - source-only `runtime` contains only `.keep`; full builds contain `.keep`, `node.exe`, and `LICENSE`, with matching SHA-256 in `PORTABLE_BUILD.json`;
-- API Base contains the approved company gateway; credentials and personal workflow IDs are blank;
+- API Base is empty; the real gateway address, credentials and personal workflow IDs are absent;
 - no history, prompts, queue state, keys, logs, personal workflow IDs, or machine paths appear;
 - the package can rebuild an equivalent package using its own builder.
 
@@ -58,7 +58,7 @@ The automated portable-package test covers these checks, but a quick manual revi
 1. Extract the ZIP to a new directory.
 2. Run `Start_API_Tool.bat`.
 3. Confirm the page opens on the displayed local URL.
-4. Confirm API Base uses the approved company gateway and user data starts empty on a fresh browser/profile and data directory.
+4. Confirm API Base starts empty and guides the recipient to supply their own gateway; user data starts empty on a fresh browser/profile and data directory. Save a mock gateway and verify browser/Agent sharing and persistence without making real provider calls.
 5. Add a temporary row and refresh to verify row persistence.
 6. Open the history page and confirm it does not contain the maintainer's records.
 7. Stop with `Stop_API_Tool.bat`.

@@ -11,6 +11,8 @@ Run media tasks through the local CLI. It starts the service in the background w
 
 ## Required Workflow
 
+For choosing a provider/channel, read [channel configuration](../../docs/CHANNEL_CONFIGURATION.md). Configure company-compatible gateways, RunningHub and Suno separately using the recipient's own access. Never assume a different API URL or key implies protocol/model compatibility. Ask which source the user intends if it is not already established; company gateway setup is needed only for steps that actually use it.
+
 For a Git checkout, installation and “同步项目” are documented in [Git workflow](../../docs/GIT_WORKFLOW.md). Run `node scripts/workbench-manage.cjs setup` from the checkout to register a lightweight Skill that follows this source; run `node scripts/workbench-manage.cjs sync` to update code, private-data backup and installed Skill together. Use `node scripts/workbench-manage.cjs cli <command>` to honor saved port/data settings. Contributions go through a separate branch/PR for the maintainer to choose.
 
 Use `scripts/run-workbench.ps1` from this skill folder. In the full skill release it extracts the embedded workbench and Windows x64 Node runtime on first use; in a source checkout it uses that checkout. Read [portable setup](references/portable-setup.md) for installation or migration. Set `API_PLUS_WORKBENCH_ROOT` only when intentionally selecting another existing installation.
@@ -19,7 +21,7 @@ For the shared voice IDs, image album, or independent speech/avatar/subtitle sta
 
 1. Run `start` or any normal command to ensure the local service is available. Browser operation is optional.
 2. Set a recognizable Agent/task source identity using the environment fields below. No local token setup is needed; `API_PLUS_AGENT_TOKEN` remains optional compatibility configuration.
-3. Run `capabilities` before selecting a task family, model, version, size, quality, duration, or media combination.
+3. Run `capabilities` before selecting a task family, model, version, size, quality, duration, or media combination. If `gateway.configured` is false, first guide the user to enter the gateway provided privately by their administrator into API Base on the local page. Do not guess or retrieve it from Git history. The page saves it in local `gateway.json` for both browser and Agent; confirm the status becomes true before company-model calls. Keep the address out of public code, commits, examples and chat output. For an explicitly supplied private UTF-8 file, use `node scripts/workbench-manage.cjs configure --gateway-file <file>` in the selected checkout. Sync retains this private setting.
 4. Run `upload` for every local image, video, or audio file. Put each returned asset object under the task-family key documented in [references/agent-api.md](references/agent-api.md).
 5. Run `submit`. Keep the returned `taskId`; the client generates a stable `clientTaskId`, so an exact retry is idempotent.
 6. Run `wait` or `status` on that same `taskId`. Do not resubmit a task in `waiting_for_worker`, `polling`, or `submission-unknown`.

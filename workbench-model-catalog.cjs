@@ -8,7 +8,7 @@ const agentAdapter = require('./agent-task-adapter.js');
 const historyOrigins = require('./history-origin-utils.js');
 
 const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-const gatewayMatch = source.match(/^const API_DEFAULT = ("[^"\r\n]+");$/m);
+const gatewayMatch = source.match(/^const API_DEFAULT = ("[^"\r\n]*");$/m);
 if (!gatewayMatch) throw new Error('Cannot read workbench API_DEFAULT from app.js');
 const DEFAULT_GATEWAY = JSON.parse(gatewayMatch[1]);
 const FAMILY_DECLARATIONS = {

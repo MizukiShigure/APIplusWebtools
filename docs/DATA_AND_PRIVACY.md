@@ -100,7 +100,9 @@ It excludes:
 - API keys and personal workflow configuration;
 - logs, recovery exports, Git metadata, and generated archives.
 
-The builder preserves the approved company API Base and neutral node templates. It does not read browser storage or local configuration. `portable-package.test.cjs` scans the expanded source package and a rebuilt package; `portable-runtime.test.cjs` can additionally verify the explicit runtime and license.
+The builder leaves API Base empty and preserves neutral node templates. It does not read browser storage or local configuration. `portable-package.test.cjs` scans the expanded source package and a rebuilt package; `portable-runtime.test.cjs` can additionally verify the explicit runtime and license.
+
+The recipient's gateway address is stored in `gateway.json` in the private server data directory. The local browser and headless Agent share it; Git sync retains and backs it up with the other private data. The browser mirrors it in localStorage. Existing explicit browser settings migrate on first startup only when no disk configuration exists. These local files are not encrypted and must not be uploaded or included in public archives. An optional `API_PLUS_GATEWAY_BASE` (legacy alias `API_GATEWAY_BASE`) environment override takes priority and makes the browser field read-only. Capabilities and setup/doctor output expose only configuration status, not the address. Only the local browser control session can read/write the address through `/api/control/v1/gateway`.
 
 ## Operator Guidance
 

@@ -1,4 +1,5 @@
-const API_DEFAULT = "https://gateway.example/api";
+const API_DEFAULT = "";
+let sharedGatewaySource = "none";
 const TASK_TIMEOUT_MS = 30 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = TASK_TIMEOUT_MS;
 const POLL_INTERVAL_MS = 60 * 1000;
@@ -1546,6 +1547,42 @@ async function controlHistoryRequest(path, options = {}) {
   return text ? JSON.parse(text) : {};
 }
 
+function validateApiBase(value) {
+  const base = String(value || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  let url;
+  try { url = new URL(base); } catch { throw new Error("请填写管理员提供的完整 HTTP(S) 网关地址"); }
+  if (!/^https?:\/\//i.test(base) || !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || /[\s\\]/.test(base)) {
+    throw new Error("API Base 只填写网关地址，不包含账号密码、查询参数或片段");
+  }
+  return base;
+}
+
+async function initializeGatewayConfig() {
+  if (location.protocol === "file:") return;
+  try {
+    let config = await controlHistoryRequest("/gateway");
+    if (!config) return;
+    const legacy = localStorage.getItem(STORAGE_KEYS.apiBase);
+    // Migrate only an explicit setting from this browser, never a source default.
+    if (config.source === "none" && legacy) {
+      config = await controlHistoryRequest("/gateway", { method: "PUT", body: { apiBase: validateApiBase(legacy) } });
+    }
+    sharedGatewaySource = config.source;
+    localStorage.setItem(STORAGE_KEYS.apiBase, config.apiBase || "");
+  } catch (error) { console.warn("Local API Base configuration unavailable", error); }
+}
+
+async function saveGatewayConfig(value) {
+  const apiBase = validateApiBase(value);
+  if (location.protocol !== "file:") {
+    const saved = await controlHistoryRequest("/gateway", { method: "PUT", body: { apiBase } });
+    if (!saved) throw new Error("本地服务不可用，网关地址尚未保存，请启动工作台后重试");
+    sharedGatewaySource = saved.source;
+  }
+  localStorage.setItem(STORAGE_KEYS.apiBase, apiBase);
+}
+
 async function readControlHistoryRecords() {
   if (location.protocol === "file:") return { available: false, records: [] };
   try {
@@ -3038,7 +3075,8 @@ function render() {
           </div>
           <label class="field">
             <span>API Base</span>
-            <input id="apiBase" type="url" spellcheck="false" value="${escapeAttr(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT)}">
+            <input id="apiBase" type="url" spellcheck="false" placeholder="填写管理员提供的网关地址" ${sharedGatewaySource === "environment" ? "readonly" : ""} value="${escapeAttr(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT)}">
+            <small id="gatewayConfigHint" role="status">${sharedGatewaySource === "environment" ? "由本机环境变量配置" : localStorage.getItem(STORAGE_KEYS.apiBase) ? "已保存在本机；网页与 Agent 共用" : "首次使用请填写网关地址；仅保存在本机，不随项目上传"}</small>
           </label>
           ${renderRunningHubMotionConfig()}
           ${renderAgentApiStatusCard()}
@@ -3195,8 +3233,18 @@ function bindShell() {
       render();
     });
   });
-  document.querySelector("#apiBase").addEventListener("change", event => {
-    localStorage.setItem(STORAGE_KEYS.apiBase, event.target.value.trim() || API_DEFAULT);
+  document.querySelector("#apiBase").addEventListener("change", async event => {
+    const input = event.target;
+    const hint = document.querySelector("#gatewayConfigHint");
+    input.disabled = true;
+    try {
+      await saveGatewayConfig(input.value);
+      input.value = localStorage.getItem(STORAGE_KEYS.apiBase) || "";
+      hint.textContent = input.value ? "已保存在本机；网页与 Agent 共用" : "尚未配置，请填写管理员提供的网关地址";
+    } catch (error) {
+      input.value = localStorage.getItem(STORAGE_KEYS.apiBase) || "";
+      hint.textContent = `保存失败：${error.message}`;
+    } finally { input.disabled = false; }
   });
   document.querySelector("#runningHubMotionActiveConfig")?.addEventListener("change", event => {
     const settings = runningHubMotionSettings();
@@ -13318,7 +13366,9 @@ function resolvePostEndpoint(endpoint) {
 }
 
 function apiBase() {
-  return (localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT).replace(/\/+$/, "");
+  const base = validateApiBase(localStorage.getItem(STORAGE_KEYS.apiBase) || API_DEFAULT);
+  if (!base) throw new Error("尚未配置 API Base，请在左侧填写管理员提供的网关地址");
+  return base;
 }
 
 function getMaxConcurrency() {
@@ -14918,6 +14968,7 @@ async function bootstrapApp() {
   persistRows();
   persistViduRefRows();
   persistAvatarRows();
+  await initializeGatewayConfig();
   await initializeHistoryStorage();
   await initializeSharedRunningHub();
   initializePromptLibrary();

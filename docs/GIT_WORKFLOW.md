@@ -38,6 +38,14 @@ Node 核心服务和管理脚本使用跨平台 API；Windows 是本次实际验
 
 安装成功后双击 `Start_API_Tool.bat` 或打开输出的网址。Agent 调用安装后的 Skill（Windows 可运行它的 `scripts/workbench.ps1`），或直接执行 `node scripts/workbench-manage.cjs cli capabilities`。每个任务填写真实来源 `API_PLUS_AGENT_SOURCE_CLIENT / SOURCE_ID / SOURCE_LABEL`。网页的历史缓存可以按 Agent 来源筛选、查看上传素材、完整 Prompt、参数和生成结果；Agent 面板提供任务状态。这里只记录通过工作台执行的操作，不记录 Agent 在其他软件中的全部行为。
 
+## 首次填写网关，只记在本机
+
+公开代码不内置真实网关地址。安装后的 Agent 必须检查 `capabilities.gateway.configured`；未配置时，引导用户打开本地网页，在左侧 **API Base** 填写管理员私下提供的完整网关地址。离开输入框后自动保存到私有数据目录的 `gateway.json`，网页与 Agent 共用，重启或“同步项目”后仍然保留。已有浏览器明确保存过的地址会在没有磁盘配置时迁移一次。
+
+不方便用网页时，可让用户把地址放入本机私有 UTF-8 文本文件，然后执行 `node scripts/workbench-manage.cjs configure --gateway-file <私有文件>`。命令输出只显示已配置状态。不要把地址写进代码、公开说明、提交或公开对话，也不要从旧 Git 历史寻找地址。可选环境变量 `API_PLUS_GATEWAY_BASE` 优先于文件配置；启用时网页不能覆盖，需修改服务环境后重启。
+
+任何人均可下载公开源码，但模型调用还需要可访问网关的内网环境及网关要求的权限、账号和额度。隐藏地址不代替访问控制。界面、Skill 和本地功能可独立安装；未配置时公司模型调用会提示先配置。
+
 ## 对 Agent 说“同步项目”
 
 1. 读取本文件，执行 `node scripts/workbench-manage.cjs doctor`，识别当前安装。

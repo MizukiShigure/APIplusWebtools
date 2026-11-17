@@ -9,6 +9,7 @@ test('new image models submit, poll, replay and preserve batch GIF controls in t
   const browser=await chromium.launch({headless:true,channel:process.env.AWF_BROWSER_CHANNEL || 'chrome'});
   t.after(()=>browser.close());
   const page=await browser.newPage({viewport:{width:1520,height:1050}});
+  await page.addInitScript(() => localStorage.setItem('api_console_api_base','https://gateway.example/api'));
   const errors=[],creates=[],queries=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',async route=>{

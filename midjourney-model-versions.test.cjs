@@ -23,7 +23,7 @@ assert.match(
   "Midjourney must default to V8.2 while retaining V8.1, V7, V6.1, and Niji 7"
 );
 assert.match(modelSource, /model_name:\s*row\.version/, "the selected version must be sent to the gateway");
-assert.match(pageSource, /app\.js\?v=update-20261115-image-models/);
+assert.match(pageSource, /app\.js\?v=update-20261118-local-gateway/);
 assert.match(packageJson.scripts.test, /node midjourney-model-versions\.test\.cjs/);
 
 console.log("midjourney model version checks passed");

@@ -6,7 +6,7 @@ Run `scripts/run-workbench.ps1 capabilities` from the skill folder. The wrapper 
 
 For a chosen existing installation, set `API_PLUS_WORKBENCH_ROOT` to its absolute directory. The wrapper does not overwrite another installation or migrate private data. Before upgrading an embedded version, stop owned active work, back up the previous data directory, and copy it to the new installation before use or keep a stable explicit `API_BATCH_DATA_DIR`.
 
-Generation uses the preconfigured company gateway and still needs that network/channel to be available. Optional personal integrations use the recipient's own saved configuration. A capability check proves local startup, not that every remote model currently has capacity.
+No company gateway address is embedded. Check `capabilities.gateway.configured`; if false, guide the recipient to enter the administrator-provided address into API Base on the local page. The workbench saves it in the private data directory as `gateway.json`, shared by browser and Agent and preserved during updates. Never add this address to source, examples or commits. Generation still needs authorized network/account/channel access. Optional personal integrations use the recipient's own saved configuration. A capability check proves local startup, not that every remote model currently has capacity.
 
 Expose this folder through the receiving Agent's supported skill discovery directory. The `local-api-workbench` deliverable is intentionally machine-specific and should only be installed on the workstation whose path it names.
 

@@ -4,7 +4,7 @@ USE THE WEB TOOL
 For a new Git clone, first run Setup_Workbench.bat to configure Node, the local service, and the Agent Skill.
 1. Double-click Start_API_Tool.bat.
 2. Open http://127.0.0.1:4198/ if the browser does not open automatically.
-3. The company gateway is preconfigured. Configure your own optional RunningHub key/workflows.
+3. Enter the administrator-provided gateway in API Base on the local page. It is saved privately for browser and Agent use. Configure your own optional RunningHub key/workflows.
 4. Double-click Stop_API_Tool.bat when finished.
 
 DEVELOP THE PROJECT

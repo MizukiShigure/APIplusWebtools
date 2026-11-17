@@ -13,7 +13,7 @@ test('native page: shared library, persisted jobs, stable drafts, responsive alb
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'avatar-browser-'));
   const agent = await createAgentService({ root: dataDir, dataDir });
   const calls={speech:0,avatar:0,subtitle:0};
-  const service = createAvatarWorkflowService({ root: dataDir, dataDir, agentService: agent, pollMs: 5,
+  const service = createAvatarWorkflowService({ root: dataDir, dataDir, agentService: agent, pollMs: 5, getGateway: () => 'https://gateway.example/api',
     media: {
       dependencies: async () => ({ffmpeg:{available:true},subtitle:{available:true}}),
       speech: async () => {calls.speech++;return { url: 'https://example.invalid/mock.mp3', mimeType: 'audio/mpeg' };},

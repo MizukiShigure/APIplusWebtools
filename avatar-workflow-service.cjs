@@ -92,7 +92,7 @@ function operationInput(input) {
   return result;
 }
 
-function createAvatarWorkflowService({ root = __dirname, dataDir, agentService, store, media, env = process.env,
+function createAvatarWorkflowService({ root = __dirname, dataDir, agentService, store, media, getGateway, env = process.env,
   autoStart = true, pollMs = 5000, pollTimeoutMs = 60 * 60 * 1000 } = {}) {
   store ||= createAvatarWorkflowStore({ dataDir });
   media ||= createAvatarWorkflowMedia({ dataDir, env });
@@ -161,7 +161,7 @@ function createAvatarWorkflowService({ root = __dirname, dataDir, agentService, 
     const workflow = wantsAvatar ? await workflowSecret(input.workflowId) : null;
     if (workflow?.workflowType && workflow.workflowType !== 'avatar') throw fail('This workflow is not configured for digital-human generation');
     const localOnly = operation === 'adjustAudio' || operation === 'subtitle';
-    const apiBase = localOnly ? '' : String(body.apiBase || input.apiBase || env.API_GATEWAY_BASE || 'https://gateway.example/api').replace(/\/$/, '');
+    const apiBase = localOnly ? '' : require('./gateway-config.cjs').requireGateway(body.apiBase || input.apiBase || getGateway?.() || env.API_PLUS_GATEWAY_BASE || env.API_GATEWAY_BASE);
     if (!localOnly && !/^https?:\/\//i.test(apiBase)) throw fail('Invalid API base');
     if (input.audioUrl && !/^https?:\/\//i.test(input.audioUrl) && !input.audioUrl.startsWith(`${PREFIX}/media/`)) throw fail('Invalid audio URL');
     if (!operation) input.options.avatar = { ...input.options.avatar, enabled: wantsAvatar };

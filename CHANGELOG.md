@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.11.18-private-gateway.1
+
+- Removed the built-in company gateway address from current public source, tests, and distribution documentation. Recipients supply their own address through the local page or a private configuration file.
+- Added persistent local gateway configuration shared by browser and Agent, a configured/unconfigured capability status, safe migration of explicit browser settings, and update/backup preservation.
+- Added channel-specific setup guidance for compatible company gateways, RunningHub and Suno. Upstream network/account permissions remain under each provider's control; changing a base URL does not adapt incompatible API protocols.
+
+
 ## v2026.11.18-git-agent-sync.1
 
 - Added clone-to-Agent setup with a private Windows Node runtime bootstrap, stable local configuration, and a managed Skill that follows the selected checkout.

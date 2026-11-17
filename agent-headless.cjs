@@ -56,7 +56,8 @@ function createHeadlessExecutor(options) {
   const catalog = () => require('./workbench-model-catalog.cjs');
   const prepareTask = options.prepareTask || ((task, runtime) => catalog().prepareTask(task, runtime));
   const fetchImpl = options.fetchImpl || fetch;
-  const gateway = String(options.gateway || process.env.API_PLUS_GATEWAY_BASE || catalog().DEFAULT_GATEWAY || 'https://gateway.example/api').replace(/\/+$/, '');
+  const { requireGateway } = require('./gateway-config.cjs');
+  const gateway = () => options.getGateway ? options.getGateway() : options.gateway || process.env.API_PLUS_GATEWAY_BASE || '';
   const pollMs = Math.max(1, Number(options.pollMs || 60000));
   const timeoutMs = Math.max(100, Number(options.timeoutMs || 30 * 60 * 1000));
   const concurrency = Math.max(1, Math.min(16, Number(options.concurrency || 3)));
@@ -68,10 +69,7 @@ function createHeadlessExecutor(options) {
   let controlCookie = '';
 
   function taskGateway(task) {
-    const base = String(task.input?.options?.apiBase || task.input?.apiBase || gateway).replace(/\/+$/, '');
-    const parsed = new URL(base);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Invalid task API base URL');
-    return base;
+    return requireGateway(task.input?.options?.apiBase || task.input?.apiBase || gateway());
   }
 
   function normalizeResult(execution, job, response) {
@@ -85,9 +83,9 @@ function createHeadlessExecutor(options) {
       outputs: results.map(url => ({ url, type: execution.mediaType || 'other' })) };
   }
 
-  async function request(endpoint, payload, { form = null, base = gateway } = {}) {
+  async function request(endpoint, payload, { form = null, base } = {}) {
     const local = endpoint.startsWith('/api/runninghub/');
-    const target = local ? `${options.localBase}${endpoint}` : `${base}${endpoint}`;
+    const target = local ? `${options.localBase}${endpoint}` : `${requireGateway(base || gateway())}${endpoint}`;
     if (local && !options.localBase) throw new Error('RunningHub local proxy address is unavailable');
     if (local && !controlCookie) {
       const session = await fetchImpl(`${options.localBase}/api/control/v1/session`);
@@ -203,7 +201,7 @@ function createHeadlessExecutor(options) {
         const prepared = await prepareTask({ ...task, input: resolvedInput }, runtime);
         const count = Number(resolvedInput.count ?? resolvedInput.options?.count ?? 1);
         if (!Number.isInteger(count) || count < 1 || count > 100) throw new Error('count must be an integer from 1 to 100');
-        execution = { taskType: prepared.taskType || task.taskType, gateway: taskGateway(task), preparedRow: publicValue(prepared.row), resolvedInput: publicValue(resolvedInput),
+        execution = { taskType: prepared.taskType || task.taskType, gateway: prepared.endpoint.startsWith('/api/runninghub/') ? '' : taskGateway(task), preparedRow: publicValue(prepared.row), resolvedInput: publicValue(resolvedInput),
           mediaType: prepared.mediaType, modelLabel: prepared.config?.label, jobs: Array.from({ length: count }, (_, index) => ({ index, state: 'queued',
             endpoint: prepared.endpoint, queryEndpoint: prepared.queryEndpoint, async: prepared.async, payload: clone(prepared.payload),
             resultModel: prepared.row?.model, results: [] })) };
@@ -221,7 +219,7 @@ function createHeadlessExecutor(options) {
             if (!runtimeApiKey || runtimeApiKey === '[runtime credential]') throw Object.assign(new Error('RunningHub runtime credential is unavailable; use a shared credential reference or API_PLUS_RUNNINGHUB_API_KEY'), { rejected: true });
             submitPayload.apiKey = runtimeApiKey;
           }
-          const response = await request(job.endpoint, submitPayload, { base: execution.gateway || gateway });
+          const response = await request(job.endpoint, submitPayload, { base: execution.gateway });
           const result = normalizeResult(execution, job, response);
           if (result.status === 'failed') throw Object.assign(new Error(result.error || 'Provider rejected generation'), { rejected: true });
           const id = result.taskId;
@@ -248,7 +246,7 @@ function createHeadlessExecutor(options) {
           job.lastQueryAt = Date.now(); job.lastQueryPayload = publicValue(query);
           await persist(taskId, execution, 'polling');
           let response;
-          try { response = await request(job.queryEndpoint, query, { base: execution.gateway || gateway }); }
+          try { response = await request(job.queryEndpoint, query, { base: execution.gateway }); }
           catch (error) {
             if (error.ambiguous) { job.lastQueryError = safeError(error); await persist(taskId, execution, 'polling'); await delay(pollMs); continue; }
             throw error;
